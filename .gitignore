@@ -1,0 +1,31 @@
+# Data
+data/
+*.csv
+*.csv.zip
+
+# Models
+*.pt
+*.onnx
+mlruns/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Results (keep summary files)
+results/*.pt
+results/*.png
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
