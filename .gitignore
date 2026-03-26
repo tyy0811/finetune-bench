@@ -16,9 +16,8 @@ dist/
 build/
 .eggs/
 
-# Results (keep summary files)
+# Results (keep summary .md and .png, ignore model weights)
 results/*.pt
-results/*.png
 
 # Environment
 .env
