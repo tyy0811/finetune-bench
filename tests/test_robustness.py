@@ -42,23 +42,34 @@ class TestInjectTypos:
 class TestTokenDropout:
     def test_shape_preserved(self):
         input_ids = torch.tensor([[101, 2023, 2003, 1037, 3231, 102]])
-        result = token_dropout(input_ids, rate=0.5, seed=42)
-        assert result.shape == input_ids.shape
+        result_ids, _ = token_dropout(input_ids, rate=0.5, seed=42)
+        assert result_ids.shape == input_ids.shape
 
     def test_cls_sep_preserved(self):
         """[CLS]=101, [SEP]=102 should never be dropped."""
         input_ids = torch.tensor([[101, 2023, 2003, 1037, 3231, 102]])
-        result = token_dropout(input_ids, rate=1.0, seed=42)
-        assert result[0, 0].item() == 101  # [CLS]
+        result_ids, _ = token_dropout(input_ids, rate=1.0, seed=42)
+        assert result_ids[0, 0].item() == 101  # [CLS]
         # Find [SEP] position (not necessarily last due to padding)
         sep_positions = (input_ids == 102).nonzero(as_tuple=True)
         for pos in sep_positions[1]:
-            assert result[0, pos.item()].item() == 102
+            assert result_ids[0, pos.item()].item() == 102
 
     def test_rate_zero_unchanged(self):
         input_ids = torch.tensor([[101, 2023, 2003, 102]])
-        result = token_dropout(input_ids, rate=0.0, seed=42)
-        assert torch.equal(result, input_ids)
+        result_ids, _ = token_dropout(input_ids, rate=0.0, seed=42)
+        assert torch.equal(result_ids, input_ids)
+
+    def test_attention_mask_zeroed(self):
+        """Dropped tokens must also have their attention_mask zeroed."""
+        input_ids = torch.tensor([[101, 2023, 2003, 1037, 3231, 102]])
+        attn_mask = torch.ones_like(input_ids)
+        result_ids, result_mask = token_dropout(
+            input_ids, attention_mask=attn_mask, rate=1.0, seed=42,
+        )
+        # Wherever input_ids became pad_id (0), attention_mask must be 0
+        dropped = (result_ids == 0) & (input_ids != 0)
+        assert torch.all(result_mask[dropped] == 0)
 
 
 class TestTruncateText:
