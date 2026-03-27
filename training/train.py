@@ -175,7 +175,7 @@ def evaluate(
 def train(config: TrainConfig) -> dict:
     """Full training pipeline. Returns test metrics dict."""
     _set_seeds(config.seed)
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Load data
     from adapters.cfpb import CFPBAdapter

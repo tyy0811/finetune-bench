@@ -104,7 +104,9 @@ def run_robustness(sample_size: int = 20_000, seed: int = 42):
             modality_dropout=False,
             dropout=0.0,
         )
-        model.load_state_dict(torch.load(model_path, weights_only=True))
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device))
+        model.to(device)
         model.eval()
 
         rob = run_robustness_eval(

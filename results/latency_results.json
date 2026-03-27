@@ -1,0 +1,7 @@
+{
+  "pytorch_single_ms": 179.23,
+  "pytorch_batch32_ms": 4001.02,
+  "onnx_single_ms": 120.24,
+  "onnx_batch32_ms": 4363.88,
+  "onnx_size_mb": 254.21
+}

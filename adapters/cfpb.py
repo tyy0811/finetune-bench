@@ -58,7 +58,22 @@ class CFPBAdapter(DatasetAdapter):
                 f"CFPB data not found at {DATA_PATH}. "
                 "Run: python scripts/download_data.py"
             )
-        return pd.read_csv(DATA_PATH, low_memory=False)
+        usecols = [
+            "Consumer complaint narrative",
+            "Product",
+            "Company",
+            "State",
+            "Submitted via",
+            "Date received",
+        ]
+        chunks = pd.read_csv(
+            DATA_PATH, low_memory=False, usecols=usecols, chunksize=200_000,
+        )
+        filtered = []
+        for chunk in chunks:
+            has_narrative = chunk["Consumer complaint narrative"].notna()
+            filtered.append(chunk[has_narrative])
+        return pd.concat(filtered, ignore_index=True)
 
     def preprocess(self) -> dict:
         df = self.load_raw()

@@ -1,0 +1,351 @@
+=== BASELINES ===
+
+============================================================
+Running B1: TF-IDF + LogReg
+============================================================
+B1 Test Macro-F1: 0.6037
+B1 Test Accuracy: 0.8230
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.69      0.85      0.76       100
+          Credit card       0.57      0.75      0.65       123
+     Credit reporting       0.97      0.85      0.91      1337
+      Debt collection       0.62      0.80      0.70       222
+       Money transfer       0.80      0.79      0.80        62
+             Mortgage       0.78      0.83      0.81        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.20      0.39      0.26        23
+         Student loan       0.62      0.81      0.70        32
+Vehicle loan or lease       0.38      0.58      0.46        26
+
+             accuracy                           0.82      2000
+            macro avg       0.56      0.66      0.60      2000
+         weighted avg       0.86      0.82      0.84      2000
+
+
+============================================================
+Running B2: LightGBM (tabular-only)
+============================================================
+Training until validation scores don't improve for 20 rounds
+Early stopping, best iteration is:
+[27]    valid_0's multi_logloss: 0.629652
+B2 Test Macro-F1: 0.4636
+B2 Test Accuracy: 0.7880
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.37      0.38      0.37       100
+          Credit card       0.39      0.59      0.47       123
+     Credit reporting       0.94      0.90      0.92      1337
+      Debt collection       0.53      0.70      0.61       222
+       Money transfer       0.89      0.65      0.75        62
+             Mortgage       0.74      0.41      0.53        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.00      0.00      0.00        23
+         Student loan       0.88      0.91      0.89        32
+Vehicle loan or lease       0.11      0.08      0.09        26
+
+             accuracy                           0.79      2000
+            macro avg       0.49      0.46      0.46      2000
+         weighted avg       0.80      0.79      0.79      2000
+
+
+=== DL VARIANTS ===
+
+============================================================
+Running M1 seed=42
+============================================================
+Epoch 1/3 | Loss: 1.2888 | Val F1: 0.6104 | Val Acc: 0.8125
+Epoch 2/3 | Loss: 0.6884 | Val F1: 0.6269 | Val Acc: 0.8265
+Epoch 3/3 | Loss: 0.4963 | Val F1: 0.6268 | Val Acc: 0.8245
+
+Test Macro-F1: 0.6170
+Test Accuracy: 0.8090
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.64      0.81      0.72       100
+          Credit card       0.53      0.73      0.62       123
+     Credit reporting       0.98      0.82      0.89      1337
+      Debt collection       0.59      0.81      0.68       222
+       Money transfer       0.89      0.76      0.82        62
+             Mortgage       0.76      0.87      0.81        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.30      0.57      0.39        23
+         Student loan       0.54      0.84      0.66        32
+Vehicle loan or lease       0.45      0.85      0.59        26
+
+             accuracy                           0.81      2000
+            macro avg       0.57      0.70      0.62      2000
+         weighted avg       0.86      0.81      0.82      2000
+
+
+============================================================
+Running M1 seed=123
+============================================================
+Epoch 1/3 | Loss: 1.2777 | Val F1: 0.5456 | Val Acc: 0.7505
+Epoch 2/3 | Loss: 0.7054 | Val F1: 0.6187 | Val Acc: 0.8265
+Epoch 3/3 | Loss: 0.5001 | Val F1: 0.6029 | Val Acc: 0.8200
+
+Test Macro-F1: 0.6268
+Test Accuracy: 0.8285
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.66      0.84      0.74        99
+          Credit card       0.66      0.75      0.70       124
+     Credit reporting       0.96      0.86      0.91      1337
+      Debt collection       0.58      0.72      0.64       222
+       Money transfer       0.92      0.71      0.80        62
+             Mortgage       0.80      0.88      0.84        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.27      0.43      0.33        23
+         Student loan       0.58      0.78      0.67        32
+Vehicle loan or lease       0.50      0.88      0.64        26
+
+             accuracy                           0.83      2000
+            macro avg       0.59      0.69      0.63      2000
+         weighted avg       0.86      0.83      0.84      2000
+
+
+============================================================
+Running M1 seed=456
+============================================================
+Epoch 1/3 | Loss: 1.2384 | Val F1: 0.5774 | Val Acc: 0.7915
+Epoch 2/3 | Loss: 0.7176 | Val F1: 0.6050 | Val Acc: 0.8310
+Epoch 3/3 | Loss: 0.4873 | Val F1: 0.6013 | Val Acc: 0.8250
+
+Test Macro-F1: 0.6269
+Test Accuracy: 0.8365
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.67      0.72      0.69        99
+          Credit card       0.65      0.79      0.71       124
+     Credit reporting       0.98      0.86      0.92      1337
+      Debt collection       0.62      0.82      0.71       222
+       Money transfer       0.76      0.74      0.75        61
+             Mortgage       0.70      0.85      0.77        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.32      0.58      0.41        24
+         Student loan       0.79      0.94      0.86        32
+Vehicle loan or lease       0.37      0.58      0.45        26
+
+             accuracy                           0.84      2000
+            macro avg       0.59      0.69      0.63      2000
+         weighted avg       0.87      0.84      0.85      2000
+
+
+============================================================
+Running M2 seed=42
+============================================================
+Epoch 1/3 | Loss: 1.2333 | Val F1: 0.6459 | Val Acc: 0.8350
+Epoch 2/3 | Loss: 0.6425 | Val F1: 0.6668 | Val Acc: 0.8670
+Epoch 3/3 | Loss: 0.4760 | Val F1: 0.6602 | Val Acc: 0.8525
+
+Test Macro-F1: 0.6560
+Test Accuracy: 0.8610
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.67      0.80      0.73       100
+          Credit card       0.58      0.76      0.65       123
+     Credit reporting       0.98      0.89      0.94      1337
+      Debt collection       0.72      0.81      0.76       222
+       Money transfer       0.89      0.79      0.84        62
+             Mortgage       0.83      0.85      0.84        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.29      0.52      0.38        23
+         Student loan       0.73      0.84      0.78        32
+Vehicle loan or lease       0.51      0.85      0.64        26
+
+             accuracy                           0.86      2000
+            macro avg       0.62      0.71      0.66      2000
+         weighted avg       0.89      0.86      0.87      2000
+
+
+============================================================
+Running M2 seed=123
+============================================================
+Epoch 1/3 | Loss: 1.2238 | Val F1: 0.5889 | Val Acc: 0.8195
+Epoch 2/3 | Loss: 0.6493 | Val F1: 0.6428 | Val Acc: 0.8655
+Epoch 3/3 | Loss: 0.4519 | Val F1: 0.6377 | Val Acc: 0.8540
+
+Test Macro-F1: 0.6645
+Test Accuracy: 0.8720
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.69      0.87      0.77        99
+          Credit card       0.73      0.73      0.73       124
+     Credit reporting       0.97      0.92      0.95      1337
+      Debt collection       0.70      0.76      0.73       222
+       Money transfer       0.94      0.76      0.84        62
+             Mortgage       0.80      0.85      0.83        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.29      0.57      0.38        23
+         Student loan       0.77      0.75      0.76        32
+Vehicle loan or lease       0.55      0.85      0.67        26
+
+             accuracy                           0.87      2000
+            macro avg       0.64      0.70      0.66      2000
+         weighted avg       0.89      0.87      0.88      2000
+
+
+============================================================
+Running M2 seed=456
+============================================================
+Epoch 1/3 | Loss: 1.1949 | Val F1: 0.5994 | Val Acc: 0.8280
+Epoch 2/3 | Loss: 0.6720 | Val F1: 0.6320 | Val Acc: 0.8575
+Epoch 3/3 | Loss: 0.4476 | Val F1: 0.6271 | Val Acc: 0.8510
+
+Test Macro-F1: 0.6459
+Test Accuracy: 0.8595
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.66      0.70      0.68        99
+          Credit card       0.71      0.80      0.75       124
+     Credit reporting       0.98      0.89      0.94      1337
+      Debt collection       0.67      0.83      0.74       222
+       Money transfer       0.71      0.74      0.73        61
+             Mortgage       0.74      0.88      0.80        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.36      0.62      0.45        24
+         Student loan       0.79      0.94      0.86        32
+Vehicle loan or lease       0.45      0.58      0.51        26
+
+             accuracy                           0.86      2000
+            macro avg       0.61      0.70      0.65      2000
+         weighted avg       0.88      0.86      0.87      2000
+
+
+============================================================
+Running M3 seed=42
+============================================================
+Epoch 1/3 | Loss: 1.3332 | Val F1: 0.6526 | Val Acc: 0.8420
+Epoch 2/3 | Loss: 0.7841 | Val F1: 0.6715 | Val Acc: 0.8725
+Epoch 3/3 | Loss: 0.6223 | Val F1: 0.6643 | Val Acc: 0.8555
+
+Test Macro-F1: 0.6611
+Test Accuracy: 0.8655
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.67      0.82      0.74       100
+          Credit card       0.57      0.74      0.64       123
+     Credit reporting       0.98      0.90      0.94      1337
+      Debt collection       0.76      0.81      0.78       222
+       Money transfer       0.92      0.76      0.83        62
+             Mortgage       0.80      0.87      0.83        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.33      0.57      0.41        23
+         Student loan       0.75      0.84      0.79        32
+Vehicle loan or lease       0.51      0.85      0.64        26
+
+             accuracy                           0.87      2000
+            macro avg       0.63      0.71      0.66      2000
+         weighted avg       0.89      0.87      0.87      2000
+
+
+============================================================
+Running M3 seed=123
+============================================================
+Epoch 1/3 | Loss: 1.3407 | Val F1: 0.6200 | Val Acc: 0.8470
+Epoch 2/3 | Loss: 0.8002 | Val F1: 0.6415 | Val Acc: 0.8610
+Epoch 3/3 | Loss: 0.6401 | Val F1: 0.6440 | Val Acc: 0.8625
+
+Test Macro-F1: 0.6666
+Test Accuracy: 0.8720
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.73      0.85      0.79        99
+          Credit card       0.68      0.78      0.73       124
+     Credit reporting       0.98      0.91      0.94      1337
+      Debt collection       0.67      0.79      0.73       222
+       Money transfer       0.87      0.76      0.81        62
+             Mortgage       0.85      0.89      0.87        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.43      0.43      0.43        23
+         Student loan       0.74      0.78      0.76        32
+Vehicle loan or lease       0.48      0.85      0.61        26
+
+             accuracy                           0.87      2000
+            macro avg       0.64      0.70      0.67      2000
+         weighted avg       0.89      0.87      0.88      2000
+
+
+============================================================
+Running M3 seed=456
+============================================================
+Epoch 1/3 | Loss: 1.2839 | Val F1: 0.5871 | Val Acc: 0.8055
+Epoch 2/3 | Loss: 0.8224 | Val F1: 0.6259 | Val Acc: 0.8580
+Epoch 3/3 | Loss: 0.6289 | Val F1: 0.6304 | Val Acc: 0.8590
+
+Test Macro-F1: 0.6537
+Test Accuracy: 0.8605
+
+                       precision    recall  f1-score   support
+
+         Bank account       0.70      0.74      0.72        99
+          Credit card       0.62      0.82      0.71       124
+     Credit reporting       0.99      0.89      0.94      1337
+      Debt collection       0.67      0.85      0.75       222
+       Money transfer       0.75      0.75      0.75        61
+             Mortgage       0.80      0.84      0.82        75
+                Other       0.00      0.00      0.00         0
+          Payday loan       0.41      0.58      0.48        24
+         Student loan       0.81      0.94      0.87        32
+Vehicle loan or lease       0.44      0.58      0.50        26
+
+             accuracy                           0.86      2000
+            macro avg       0.62      0.70      0.65      2000
+         weighted avg       0.88      0.86      0.87      2000
+
+
+All results saved to results/all_results.json
+
+=== ROBUSTNESS EVALUATION ===
+
+============================================================
+Robustness evaluation: M1
+============================================================
+  clean: F1=0.6177, Acc=0.8095
+  typo_10: F1=0.3892, Acc=0.5965
+  typo_20: F1=0.2157, Acc=0.3055
+  token_drop_20: F1=0.5780, Acc=0.7760
+  token_drop_40: F1=0.5499, Acc=0.7395
+  truncate_32: F1=0.5703, Acc=0.7685
+
+============================================================
+Robustness evaluation: M2
+============================================================
+  clean: F1=0.6560, Acc=0.8610
+  typo_10: F1=0.4813, Acc=0.7935
+  typo_20: F1=0.3316, Acc=0.7210
+  token_drop_20: F1=0.6312, Acc=0.8485
+  token_drop_40: F1=0.6121, Acc=0.8380
+  truncate_32: F1=0.6165, Acc=0.8320
+  tabular_drop_50: F1=0.6023, Acc=0.7865
+  tabular_ablation: F1=0.5516, Acc=0.6945
+
+============================================================
+Robustness evaluation: M3
+============================================================
+  clean: F1=0.6611, Acc=0.8655
+  typo_10: F1=0.4701, Acc=0.7950
+  typo_20: F1=0.3420, Acc=0.7320
+  token_drop_20: F1=0.6400, Acc=0.8575
+  token_drop_40: F1=0.6194, Acc=0.8425
+  truncate_32: F1=0.6213, Acc=0.8420
+  tabular_drop_50: F1=0.6139, Acc=0.8165
+  tabular_ablation: F1=0.5672, Acc=0.7595
+
+Robustness results saved to results/robustness_results.json
+
+=== ONNX EXPORT ===
+
+Best M2: seed=123, test_macro_f1=0.6645
+Latency: {"pytorch_single_ms": 179.23, "pytorch_batch32_ms": 4001.02, "onnx_single_ms": 120.24, "onnx_batch32_ms": 4363.88, "onnx_size_mb": 254.21}

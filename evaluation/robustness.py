@@ -75,12 +75,12 @@ def token_dropout(
     if rate == 0.0:
         return input_ids.clone(), attention_mask.clone() if attention_mask is not None else None
 
-    gen = torch.Generator()
+    gen = torch.Generator(device="cpu")
     if seed is not None:
         gen.manual_seed(seed)
 
     result = input_ids.clone()
-    mask = torch.rand(result.shape, generator=gen) < rate
+    mask = (torch.rand(result.shape, generator=gen) < rate).to(result.device)
 
     # Protect special tokens
     mask = mask & (result != cls_id) & (result != sep_id) & (result != pad_id)
@@ -112,11 +112,11 @@ def tabular_dropout(
     if rate == 1.0:
         return torch.zeros_like(features)
 
-    gen = torch.Generator()
+    gen = torch.Generator(device="cpu")
     if seed is not None:
         gen.manual_seed(seed)
 
-    mask = torch.rand(features.shape, generator=gen) >= rate
+    mask = (torch.rand(features.shape, generator=gen) >= rate).to(features.device)
     return features * mask.float()
 
 
@@ -133,7 +133,7 @@ def run_robustness_eval(
     class_names: list[str],
     tokenizer,
     max_length: int = 128,
-    device: torch.device = torch.device("cpu"),
+    device: torch.device = None,
     seed: int = 42,
     is_text_only: bool = False,
 ) -> dict[str, dict]:
@@ -145,6 +145,8 @@ def run_robustness_eval(
 
     Returns dict mapping corruption_name -> {macro_f1, accuracy}.
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     import numpy as np
 
     from evaluation.metrics import compute_metrics
