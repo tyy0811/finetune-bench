@@ -156,10 +156,14 @@ def evaluate(
     loader: DataLoader,
     class_names: list[str],
     device: torch.device,
-) -> MetricsResult:
-    """Evaluate model on a data loader."""
+    return_probs: bool = False,
+) -> MetricsResult | tuple[MetricsResult, np.ndarray]:
+    """Evaluate model on a data loader.
+
+    If return_probs=True, also returns (n_samples, n_classes) softmax array.
+    """
     model.eval()
-    all_preds, all_labels = [], []
+    all_preds, all_labels, all_probs = [], [], []
 
     with torch.no_grad():
         for batch in loader:
@@ -168,8 +172,14 @@ def evaluate(
             logits = model(text_inputs, tabular_features)
             all_preds.extend(logits.argmax(dim=-1).cpu().tolist())
             all_labels.extend(batch["labels"].tolist())
+            if return_probs:
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+                all_probs.extend(probs.cpu().numpy())
 
-    return compute_metrics(all_labels, all_preds, class_names)
+    metrics = compute_metrics(all_labels, all_preds, class_names)
+    if return_probs:
+        return metrics, np.array(all_probs)
+    return metrics
 
 
 def train(config: TrainConfig) -> dict:

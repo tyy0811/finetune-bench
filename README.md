@@ -1,5 +1,7 @@
 # finetune-bench
 
+[![Tests](https://github.com/tyy0811/finetune-bench/actions/workflows/test.yml/badge.svg)](https://github.com/tyy0811/finetune-bench/actions/workflows/test.yml)
+
 Multimodal text+tabular classification benchmark with robustness training and corruption evaluation.
 
 ## Key Results
