@@ -47,6 +47,10 @@ Multimodal text+tabular classification benchmark with robustness training and co
 
 6. **Tabular-only baseline (B2) is the weakest.** LightGBM achieves only 0.46 F1, confirming that narrative text is the primary information source for product classification. B2 fails completely on Payday loan (F1=0.00) where the product label depends on narrative context rather than company or submission metadata.
 
+7. **Fusion gain is driven by company identity.** M2b (fusion without `company` and `company_complaint_volume`) achieves 0.6189 F1 — below M1's 0.6236. The +3.2pp fusion gain from Finding #1 does not survive removal of company features, indicating the architecture works but the CFPB-specific gain is largely entity memorization. State and submission channel alone do not add signal beyond text.
+
+8. **Temporal drift is mild.** Under a time-based split (train: pre-2023, test: post-2023), M2 achieves 0.6471 F1 (vs 0.6555 on random split, -0.8pp). This small degradation suggests the model generalizes across time reasonably well, though the test distribution may share enough company patterns with training to mask larger drift.
+
 ### Training Curves
 
 ![Training curves](results/training_curves.png)
@@ -170,8 +174,8 @@ ONNX export with latency comparison:
 **Dataset limitations:**
 - CFPB narratives are opt-in, not a representative sample
 - Class imbalance (Debt collection dominates); mitigated with inverse-frequency class weights and macro-F1
-- `company` feature creates shortcut learning risk (company -> product correlation). Text-only variant (M1) isolates language-only signal
-- Temporal distribution shift expected but not quantified unless temporal diagnostic was run
+- `company` feature creates shortcut learning risk (company -> product correlation). No-company diagnostic (M2b) confirms fusion gain is dependent on company identity — M2b F1 (0.6189) falls below M1 (0.6236)
+- Temporal distribution shift: M2 drops 0.8pp under time-based split (pre/post 2023), consistent with mild drift from evolving complaint patterns
 
 **Model limitations:**
 - DistilBERT is English-only; not tested on other languages
@@ -180,5 +184,5 @@ ONNX export with latency comparison:
 
 **Leakage safeguards:**
 - `company_complaint_volume` computed on training split only, log-transformed and standardized
-- `company` shortcut acknowledged; M1 provides shortcut-free baseline
+- `company` shortcut acknowledged; M1 provides shortcut-free baseline; M2b diagnostic confirms fusion gain depends on company identity
 - All encoding categories (top-50 companies, states, channels) derived from training data only
