@@ -1,14 +1,13 @@
 """Tests for corruption functions."""
 
 import torch
-import pytest
 
 from evaluation.robustness import (
     inject_typos,
+    tabular_ablation,
+    tabular_dropout,
     token_dropout,
     truncate_text,
-    tabular_dropout,
-    tabular_ablation,
 )
 
 

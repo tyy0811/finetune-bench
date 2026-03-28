@@ -13,11 +13,10 @@ from transformers import DistilBertTokenizer
 from adapters.cfpb import CFPBAdapter
 from evaluation.export import benchmark_latency, export_to_onnx
 from evaluation.robustness import run_robustness_eval
-from models.baselines import train_tfidf_logreg, train_lightgbm
+from models.baselines import train_lightgbm, train_tfidf_logreg
 from models.fusion_model import MultimodalClassifier
 from training.config import TrainConfig
 from training.train import train
-
 
 SEEDS = [42, 123, 456]
 RESULTS_DIR = Path("results")

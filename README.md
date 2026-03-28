@@ -4,6 +4,18 @@
 
 Multimodal text+tabular classification benchmark with robustness training and corruption evaluation.
 
+`36 tests` | `5 ablation variants` | `8 corruption conditions` | `Docker` | `ONNX export` | `CI green`
+
+## What This Demonstrates
+
+- Custom PyTorch training loop (not HuggingFace Trainer)
+- Systematic ablation methodology (5 variants x 3 seeds)
+- Corruption robustness evaluation (5 types, 8 conditions)
+- Honest diagnostics (entity memorization, temporal drift)
+- Production packaging (MLflow, ONNX export, Docker)
+
+See [agent-bench](https://github.com/tyy0811/agent-bench) for agentic RAG and retrieval evaluation evidence.
+
 ## Key Results
 
 > 20K-sample random split, 3 epochs, evaluated on held-out test set (n=2000).
@@ -84,8 +96,6 @@ DistilBERT               Feature eng. + MLP
       Product category
 ```
 
-The classifier is designed as a modular component compatible with retrieval-augmented pipelines; see [agent-bench](https://github.com/tyy0811/agent-bench) for retrieval system evidence.
-
 ## Quick Start
 
 ```bash
@@ -134,7 +144,8 @@ The merge map is defined in `adapters/cfpb.py:_PRODUCT_MERGE_MAP`.
 
 </details>
 
-## Training
+<details>
+<summary>Training details</summary>
 
 Custom PyTorch loop (`training/train.py`) with:
 
@@ -146,7 +157,10 @@ Custom PyTorch loop (`training/train.py`) with:
 - MLflow experiment tracking
 - Inverse-frequency class weights for imbalanced data
 
-## Robustness
+</details>
+
+<details>
+<summary>Robustness corruption types</summary>
 
 Five corruption types evaluate model degradation:
 
@@ -158,9 +172,10 @@ Five corruption types evaluate model degradation:
 | Tabular dropout | Zero 50% of features independently |
 | Tabular ablation | Zero all tabular features |
 
-## Deployment
+</details>
 
-ONNX export with latency comparison:
+<details>
+<summary>ONNX deployment latency</summary>
 
 | Format | Latency (single) | Latency (batch=32) | Model size |
 |--------|-------------------|--------------------|------------|
@@ -168,6 +183,8 @@ ONNX export with latency comparison:
 | ONNX | 120.24 ms | 4363.88 ms | 254.21 MB |
 
 *CPU inference (Colab T4 instance, CPU path). ONNX provides 33% single-sample speedup; batch performance is comparable, likely due to CPU-bound memory throughput at batch=32.*
+
+</details>
 
 ## Limitations & Ethics
 

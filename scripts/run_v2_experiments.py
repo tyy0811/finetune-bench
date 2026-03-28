@@ -92,8 +92,9 @@ def run_calibration():
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
     tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
-    from training.train import ComplaintDataset
     from torch.utils.data import DataLoader
+
+    from training.train import ComplaintDataset
 
     test_ds = ComplaintDataset(
         splits["test"]["narratives"],
@@ -178,7 +179,7 @@ def run_per_class_robustness():
 
     # Run robustness eval — we need per-class F1, so we use the existing
     # run_robustness_eval and extend it
-    rob = run_robustness_eval(
+    run_robustness_eval(
         model=model,
         test_narratives=splits["test"]["narratives"],
         test_tabular=splits["test"]["tabular_features"],
@@ -190,11 +191,14 @@ def run_per_class_robustness():
     )
 
     # Now run again but capture per-class F1 for each corruption
-    from evaluation.robustness import (
-        inject_typos, token_dropout, truncate_text,
-        tabular_dropout, tabular_ablation,
-    )
     from evaluation.metrics import compute_metrics
+    from evaluation.robustness import (
+        inject_typos,
+        tabular_ablation,
+        tabular_dropout,
+        token_dropout,
+        truncate_text,
+    )
 
     test_tabular_t = torch.tensor(
         splits["test"]["tabular_features"], dtype=torch.float32

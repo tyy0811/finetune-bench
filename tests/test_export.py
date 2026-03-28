@@ -5,10 +5,9 @@ import tempfile
 
 import numpy as np
 import torch
-import pytest
 
-from models.fusion_model import MultimodalClassifier
 from evaluation.export import export_to_onnx
+from models.fusion_model import MultimodalClassifier
 
 
 def test_onnx_export_produces_file():

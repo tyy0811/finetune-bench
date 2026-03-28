@@ -43,9 +43,9 @@ vol = modal.Volume.from_name("finetune-bench-data", create_if_missing=True)
     timeout=14400,
 )
 def run_all():
-    import subprocess
     import os
     import shutil
+    import subprocess
 
     os.chdir("/root/finetune-bench")
     os.environ["PYTHONUNBUFFERED"] = "1"
@@ -117,7 +117,7 @@ def run_all():
         shutil.rmtree(results_vol_dir)
     shutil.copytree("results", results_vol_dir)
     vol.commit()
-    print(f"\nResults copied to volume")
+    print("\nResults copied to volume")
 
     return results
 

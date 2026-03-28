@@ -1,7 +1,7 @@
 """Tests for fusion model forward pass shapes."""
 
-import torch
 import pytest
+import torch
 
 from models.fusion_model import MultimodalClassifier
 
