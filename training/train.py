@@ -19,6 +19,7 @@ from transformers import DistilBertTokenizer, get_cosine_schedule_with_warmup
 from evaluation.metrics import MetricsResult, compute_metrics
 from models.fusion_model import MultimodalClassifier
 from training.config import TrainConfig
+from training.gpu_profiler import GPUProfiler
 
 
 class ComplaintDataset(Dataset):
@@ -107,6 +108,7 @@ def train_one_epoch(
     config: TrainConfig,
     epoch: int,
     device: torch.device,
+    profiler: GPUProfiler | None = None,
 ) -> float:
     """Train for one epoch. Returns average loss."""
     model.train()
@@ -138,6 +140,9 @@ def train_one_epoch(
 
         global_step = epoch * len(train_loader) + step
         mlflow.log_metric("train_loss_step", batch_loss, step=global_step)
+
+        if profiler is not None:
+            profiler.on_step_end(epoch, step)
 
     # Flush any remaining accumulated gradients from incomplete final batch
     if (step + 1) % config.grad_accumulation_steps != 0:
@@ -281,6 +286,7 @@ def train(config: TrainConfig) -> dict:
     )
 
     early_stopper = EarlyStopper(patience=config.early_stopping_patience)
+    profiler = GPUProfiler(enabled=torch.cuda.is_available())
 
     results_dir = Path(config.results_dir)
     results_dir.mkdir(exist_ok=True)
@@ -293,10 +299,13 @@ def train(config: TrainConfig) -> dict:
 
         best_val_f1 = 0.0
         for epoch in range(config.num_epochs):
+            profiler.on_epoch_start(epoch)
             train_loss = train_one_epoch(
                 model, train_loader, optimizer, scheduler,
                 class_weights, config, epoch, device,
+                profiler=profiler,
             )
+            profiler.on_epoch_end(epoch)
             val_metrics = evaluate(model, val_loader, adapter.class_names, device)
 
             print(
@@ -339,6 +348,12 @@ def train(config: TrainConfig) -> dict:
             "test_macro_f1": test_metrics.macro_f1,
             "test_accuracy": test_metrics.accuracy,
         })
+
+        # Log GPU profiling metrics
+        gpu_summary = profiler.summary()
+        for key, value in gpu_summary.items():
+            if isinstance(value, (int, float)):
+                mlflow.log_metric(f"gpu/{key}", value)
 
         final_path = results_dir / f"{run_name}.pt"
         torch.save(model.state_dict(), final_path)
