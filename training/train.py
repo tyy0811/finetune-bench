@@ -352,7 +352,7 @@ def train(config: TrainConfig) -> dict:
         # Log GPU profiling metrics
         gpu_summary = profiler.summary()
         for key, value in gpu_summary.items():
-            if isinstance(value, (int, float)):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
                 mlflow.log_metric(f"gpu/{key}", value)
 
         final_path = results_dir / f"{run_name}.pt"

@@ -73,7 +73,7 @@ class GPUProfiler:
         peak = max(s.max_allocated_mb for s in self.snapshots)
         mean_alloc = sum(s.allocated_mb for s in self.snapshots) / len(self.snapshots)
         gpu_name = torch.cuda.get_device_name(self.device)
-        gpu_total_mb = torch.cuda.get_device_properties(self.device).total_mem / 1e6
+        gpu_total_mb = torch.cuda.get_device_properties(self.device).total_memory / 1e6
 
         return {
             "gpu_available": True,
