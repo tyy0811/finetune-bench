@@ -35,6 +35,7 @@ class TrainConfig(BaseModel):
     warmup_fraction: float = 0.1
     dropout: float = 0.3
     early_stopping_patience: int = 2
+    use_amp: bool = False  # Enable mixed-precision (fp16) training
 
     # MLflow
     experiment_name: str = "finetune-bench"
