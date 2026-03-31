@@ -24,6 +24,9 @@ results/*.pt
 .venv/
 venv/
 
+# Planning docs (local only)
+docs/plans/
+
 # IDE
 .idea/
 .vscode/
