@@ -201,6 +201,16 @@ python scripts/run_all_experiments.py --use-amp
 mlflow ui  # Navigate to gpu/ metrics
 ```
 
+**GPU profiling sample** (from M2 fp32, seed 42 on Modal A10G):
+
+| Metric | Value |
+|--------|-------|
+| GPU | NVIDIA A10 (24 GB VRAM) |
+| Peak allocated | 1950 MB (8.2% utilization) |
+| Mean allocated | 1095 MB |
+| Epoch time | 70.7s |
+| Total training time | 212.0s (3 epochs) |
+
 **fp32 vs fp16 comparison (Modal A10G, 24 GB):**
 
 ```bash
