@@ -181,8 +181,7 @@ Five corruption types evaluate model degradation:
 
 </details>
 
-<details>
-<summary>GPU profiling & mixed precision</summary>
+## GPU Profiling & Mixed Precision
 
 Training supports automatic mixed precision (fp16) via `torch.cuda.amp`, with GPU memory profiling logged to MLflow.
 
@@ -227,8 +226,6 @@ Runs 4 configs (M2/M3 x fp32/fp16) x 3 seeds = 12 runs. Results saved to `result
 | M3      | fp16      | 0.6598   | 1797          | 34.4            | 1.9x    |
 
 *NVIDIA A10 (24 GB VRAM), 3 seeds each. DistilBERT (66M params) shows ~2x epoch speedup from fp16 Tensor Core acceleration, with only 8% peak memory reduction — the model is too small for dramatic memory savings. F1 is preserved within noise. See [DECISIONS.md](DECISIONS.md) for design rationale.*
-
-</details>
 
 ## Limitations & Ethics
 
