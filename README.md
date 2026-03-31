@@ -2,17 +2,9 @@
 
 [![Tests](https://github.com/tyy0811/finetune-bench/actions/workflows/test.yml/badge.svg)](https://github.com/tyy0811/finetune-bench/actions/workflows/test.yml)
 
-Multimodal text+tabular classification benchmark with robustness training and corruption evaluation.
+Multimodal classification benchmark where the headline fusion gain turned out to be entity memorization — and the ablation proved it.
 
-`36 tests` | `5 ablation variants` | `8 corruption conditions` | `Docker` | `ONNX export` | `CI green`
-
-## What This Demonstrates
-
-- Custom PyTorch training loop (not HuggingFace Trainer)
-- Systematic ablation methodology (5 variants x 3 seeds)
-- Corruption robustness evaluation (5 types, 8 conditions)
-- Honest diagnostics (entity memorization, temporal drift)
-- Production packaging (MLflow, ONNX export, Docker)
+`45 tests` | `5 ablation variants` | `8 corruption conditions` | `fp16 mixed-precision` | `Docker` | `ONNX export` | `CI green`
 
 See [agent-bench](https://github.com/tyy0811/agent-bench) for agentic RAG and retrieval evaluation evidence.
 
@@ -44,6 +36,8 @@ See [agent-bench](https://github.com/tyy0811/agent-bench) for agentic RAG and re
 | Truncation | 32 tokens | 0.5703 | 0.6165 | 0.6213 | +0.0510 |
 | Tabular dropout | 50% | N/A | 0.6023 | 0.6139 | -- |
 | Full tabular ablation | -- | N/A | 0.5516 | 0.5672 | -- |
+
+> **The most important finding isn't in these tables:** the +3.2pp fusion gain disappears when company features are removed (Finding #7), revealing that the architecture works but the CFPB-specific gain is entity memorization, not generalizable multimodal learning.
 
 ### Findings
 
@@ -177,12 +171,52 @@ Five corruption types evaluate model degradation:
 <details>
 <summary>ONNX deployment latency</summary>
 
-| Format | Latency (single) | Latency (batch=32) | Model size |
-|--------|-------------------|--------------------|------------|
-| PyTorch | 179.23 ms | 4001.02 ms | ~254 MB |
-| ONNX | 120.24 ms | 4363.88 ms | 254.21 MB |
+| Format | Precision | Latency (single) | Latency (batch=32) | Model size |
+|--------|-----------|-------------------|--------------------|------------|
+| PyTorch | fp32 | 191.18 ms | 5344.49 ms | ~267 MB |
+| ONNX | fp32 | 30.24 ms | 724.33 ms | 266.6 MB |
+| ONNX | fp16 | 39.62 ms | 905.27 ms | 133.3 MB |
 
-*CPU inference (Colab T4 instance, CPU path). ONNX provides 33% single-sample speedup; batch performance is comparable, likely due to CPU-bound memory throughput at batch=32.*
+*CPU inference on Modal A10G instance (CPU path). ONNX fp32 provides 6.3x single-sample speedup. fp16 ONNX halves model size (267 -> 133 MB) but is slightly slower than fp32 on CPU due to fp16->fp32 cast overhead; fp16 latency advantages require GPU inference with Tensor Core support.*
+
+</details>
+
+<details>
+<summary>GPU profiling & mixed precision</summary>
+
+Training supports automatic mixed precision (fp16) via `torch.cuda.amp`, with GPU memory profiling logged to MLflow.
+
+**Enable fp16 training:**
+
+```bash
+python training/train.py --variant M2 --use-amp
+
+# Or run the full experiment matrix with fp16
+python scripts/run_all_experiments.py --use-amp
+```
+
+**GPU profiling** is automatic on CUDA: every training run logs peak memory, mean allocation, GPU name, and per-epoch timing to MLflow under the `gpu/` namespace. View with:
+
+```bash
+mlflow ui  # Navigate to gpu/ metrics
+```
+
+**fp32 vs fp16 comparison (Modal A10G, 24 GB):**
+
+```bash
+modal run scripts/modal_run.py --amp
+```
+
+Runs 4 configs (M2/M3 x fp32/fp16) x 3 seeds = 12 runs. Results saved to `results/amp_comparison.json`.
+
+| Variant | Precision | Macro-F1 | Peak GPU (MB) | Epoch Time (s) | Speedup |
+|---------|-----------|----------|---------------|-----------------|---------|
+| M2      | fp32      | 0.6562   | 1951          | 70.9            | --      |
+| M2      | fp16      | 0.6570   | 1797          | 36.2            | 2.0x    |
+| M3      | fp32      | 0.6619   | 1952          | 66.5            | --      |
+| M3      | fp16      | 0.6598   | 1797          | 34.4            | 1.9x    |
+
+*NVIDIA A10 (24 GB VRAM), 3 seeds each. DistilBERT (66M params) shows ~2x epoch speedup from fp16 Tensor Core acceleration, with only 8% peak memory reduction — the model is too small for dramatic memory savings. F1 is preserved within noise. See [DECISIONS.md](DECISIONS.md) for design rationale.*
 
 </details>
 

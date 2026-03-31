@@ -38,6 +38,7 @@ class GPUProfiler:
         self.snapshots: list[GPUSnapshot] = []
         self._epoch_start_time: float = 0.0
         self.epoch_times: list[float] = []
+        self.epoch_peaks_mb: list[float] = []
 
     def on_epoch_start(self, epoch: int):
         if not self.enabled:
@@ -62,16 +63,30 @@ class GPUProfiler:
     def on_epoch_end(self, epoch: int):
         if not self.enabled:
             return
+        # Capture true epoch peak from PyTorch's internal tracker,
+        # which is authoritative regardless of our sampling interval
+        self.epoch_peaks_mb.append(
+            torch.cuda.max_memory_allocated(self.device) / 1e6
+        )
         elapsed = time.time() - self._epoch_start_time
         self.epoch_times.append(elapsed)
 
     def summary(self) -> dict:
         """Return summary dict suitable for MLflow logging."""
-        if not self.enabled or not self.snapshots:
+        if not self.enabled or (not self.snapshots and not self.epoch_peaks_mb):
             return {"gpu_available": False}
 
-        peak = max(s.max_allocated_mb for s in self.snapshots)
-        mean_alloc = sum(s.allocated_mb for s in self.snapshots) / len(self.snapshots)
+        # Use authoritative epoch peaks from PyTorch's internal tracker
+        # (not sampled snapshots, which can miss inter-sample spikes)
+        if self.epoch_peaks_mb:
+            peak = max(self.epoch_peaks_mb)
+        else:
+            peak = max(s.max_allocated_mb for s in self.snapshots)
+        mean_alloc = (
+            sum(s.allocated_mb for s in self.snapshots) / len(self.snapshots)
+            if self.snapshots
+            else 0.0
+        )
         gpu_name = torch.cuda.get_device_name(self.device)
         gpu_total_mb = torch.cuda.get_device_properties(self.device).total_memory / 1e6
 

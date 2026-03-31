@@ -11,7 +11,7 @@ import torch
 from transformers import DistilBertTokenizer
 
 from adapters.cfpb import CFPBAdapter
-from evaluation.export import benchmark_latency, export_to_onnx
+from evaluation.export import benchmark_latency, convert_onnx_to_fp16, export_to_onnx
 from evaluation.robustness import run_robustness_eval
 from models.baselines import train_lightgbm, train_tfidf_logreg
 from models.fusion_model import MultimodalClassifier
@@ -54,14 +54,17 @@ def run_baselines(sample_size: int = 20_000, seed: int = 42):
     return b1_results, b2_results
 
 
-def run_dl_variants(sample_size: int = 20_000, num_epochs: int = 3):
+def run_dl_variants(sample_size: int = 20_000, num_epochs: int = 3, use_amp: bool = False):
     """Run M1, M2, M3 across all seeds."""
     all_results = []
 
+    precision = "fp16" if use_amp else "fp32"
+
     for variant in ["M1", "M2", "M3"]:
         for seed in SEEDS:
+            run_name = f"{variant}_{precision}_seed{seed}" if use_amp else None
             print("\n" + "=" * 60)
-            print(f"Running {variant} seed={seed}")
+            print(f"Running {variant} seed={seed} ({precision})")
             print("=" * 60)
 
             config = TrainConfig(
@@ -69,23 +72,28 @@ def run_dl_variants(sample_size: int = 20_000, num_epochs: int = 3):
                 seed=seed,
                 sample_size=sample_size,
                 num_epochs=num_epochs,
+                use_amp=use_amp,
+                run_name=run_name,
             )
             result = train(config)
+            result["use_amp"] = use_amp
             all_results.append(result)
 
     return all_results
 
 
-def run_robustness(sample_size: int = 20_000, seed: int = 42):
+def run_robustness(sample_size: int = 20_000, seed: int = 42, use_amp: bool = False):
     """Run robustness evaluation for M1, M2, M3 (first seed)."""
     adapter = CFPBAdapter(sample_size=sample_size, seed=seed)
     splits = adapter.preprocess()
     tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
+    precision = "fp16" if use_amp else "fp32"
+
     robustness_results = {}
     for variant in ["M1", "M2", "M3"]:
-        run_name = f"{variant}_seed{seed}"
+        run_name = f"{variant}_{precision}_seed{seed}" if use_amp else f"{variant}_seed{seed}"
         model_path = RESULTS_DIR / f"{run_name}_best.pt"
         if not model_path.exists():
             model_path = RESULTS_DIR / f"{run_name}.pt"
@@ -127,26 +135,30 @@ def run_robustness(sample_size: int = 20_000, seed: int = 42):
     return robustness_results
 
 
-def run_onnx_export(sample_size: int = 20_000, seed: int = 42):
+def run_onnx_export(sample_size: int = 20_000, seed: int = 42, use_amp: bool = False):
     """Export best M2 model (highest test F1 across seeds) to ONNX and benchmark."""
     # Find best M2 across seeds by test_macro_f1 BEFORE building adapter
+    precision = "fp16" if use_amp else "fp32"
     results_path = RESULTS_DIR / "all_results.json"
     best_seed = seed
     if results_path.exists():
         with open(results_path) as f:
             all_results = json.load(f)
+        # Filter to matching precision when use_amp is set
         m2_results = [r for r in all_results if r.get("variant") == "M2"]
+        if use_amp:
+            m2_results = [r for r in m2_results if r.get("use_amp")]
         if m2_results:
             best = max(m2_results, key=lambda r: r["test_macro_f1"])
             best_seed = best["seed"]
-            print(f"Best M2: seed={best_seed}, test_macro_f1={best['test_macro_f1']:.4f}")
+            print(f"Best M2 ({precision}): seed={best_seed}, test_macro_f1={best['test_macro_f1']:.4f}")
 
     # Build adapter with the SAME seed used to train the best model
     adapter = CFPBAdapter(sample_size=sample_size, seed=best_seed)
     splits = adapter.preprocess()
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    run_name = f"M2_seed{best_seed}"
+    run_name = f"M2_{precision}_seed{best_seed}" if use_amp else f"M2_seed{best_seed}"
     model_path = RESULTS_DIR / f"{run_name}_best.pt"
     if not model_path.exists():
         model_path = RESULTS_DIR / f"{run_name}.pt"
@@ -172,12 +184,25 @@ def run_onnx_export(sample_size: int = 20_000, seed: int = 42):
     print(f"ONNX model exported to {onnx_path}")
 
     latency = benchmark_latency(model, onnx_path, tabular_dim=tabular_dim)
-    print(f"Latency results: {latency}")
+    print(f"Latency results (fp32): {latency}")
+
+    # fp16 ONNX conversion + benchmark
+    onnx_fp16_path = str(RESULTS_DIR / "model_m2_fp16.onnx")
+    convert_onnx_to_fp16(onnx_path, onnx_fp16_path)
+    print(f"ONNX fp16 model exported to {onnx_fp16_path}")
+
+    latency_fp16 = benchmark_latency(model, onnx_fp16_path, tabular_dim=tabular_dim)
+    print(f"Latency results (fp16): {latency_fp16}")
+
+    combined_latency = {
+        "fp32": latency,
+        "fp16": latency_fp16,
+    }
 
     with open(RESULTS_DIR / "latency_results.json", "w") as f:
-        json.dump(latency, f, indent=2)
+        json.dump(combined_latency, f, indent=2)
 
-    return latency
+    return combined_latency
 
 
 def main():
@@ -195,6 +220,10 @@ def main():
         "--skip-onnx", action="store_true",
         help="Skip ONNX export and latency benchmarking",
     )
+    parser.add_argument(
+        "--use-amp", action="store_true",
+        help="Enable fp16 mixed-precision training",
+    )
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(exist_ok=True)
@@ -205,6 +234,7 @@ def main():
     print("\n=== DL VARIANTS ===")
     dl_results = run_dl_variants(
         sample_size=args.sample_size, num_epochs=args.epochs,
+        use_amp=args.use_amp,
     )
 
     all_results = [b1, b2] + dl_results
@@ -214,11 +244,11 @@ def main():
 
     if not args.skip_robustness:
         print("\n=== ROBUSTNESS EVALUATION ===")
-        run_robustness(sample_size=args.sample_size)
+        run_robustness(sample_size=args.sample_size, use_amp=args.use_amp)
 
     if not args.skip_onnx:
         print("\n=== ONNX EXPORT ===")
-        run_onnx_export(sample_size=args.sample_size)
+        run_onnx_export(sample_size=args.sample_size, use_amp=args.use_amp)
 
 
 if __name__ == "__main__":

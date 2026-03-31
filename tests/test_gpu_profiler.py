@@ -42,6 +42,9 @@ def _make_enabled_profiler():
         GPUSnapshot(epoch=0, step=50, allocated_mb=550.0, reserved_mb=850.0, max_allocated_mb=650.0),
     ]
     profiler.epoch_times = [12.5, 11.8]
+    # Authoritative epoch peaks from torch.cuda.max_memory_allocated()
+    # (higher than sampled snapshots to represent inter-sample spikes)
+    profiler.epoch_peaks_mb = [700.0, 680.0]
     return profiler
 
 
@@ -59,7 +62,8 @@ def test_profiler_summary_enabled_path(mock_cuda):
     assert summary["gpu_available"] is True
     assert summary["gpu_name"] == "NVIDIA A10G"
     assert summary["gpu_total_mb"] == round(24_000_000_000 / 1e6, 0)
-    assert summary["gpu_peak_allocated_mb"] == 650.0
+    # Peak uses authoritative epoch_peaks_mb (700.0), not sampled snapshots (650.0)
+    assert summary["gpu_peak_allocated_mb"] == 700.0
     assert summary["gpu_mean_allocated_mb"] == 525.0
     assert summary["epoch_mean_time_s"] == 12.2
     assert summary["total_training_time_s"] == 24.3
