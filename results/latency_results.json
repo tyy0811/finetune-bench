@@ -1,7 +1,16 @@
 {
-  "pytorch_single_ms": 179.23,
-  "pytorch_batch32_ms": 4001.02,
-  "onnx_single_ms": 120.24,
-  "onnx_batch32_ms": 4363.88,
-  "onnx_size_mb": 254.21
+  "fp32": {
+    "pytorch_single_ms": 191.18,
+    "pytorch_batch32_ms": 5344.49,
+    "onnx_single_ms": 30.24,
+    "onnx_batch32_ms": 724.33,
+    "onnx_size_mb": 266.6
+  },
+  "fp16": {
+    "pytorch_single_ms": 191.26,
+    "pytorch_batch32_ms": 5310.7,
+    "onnx_single_ms": 39.62,
+    "onnx_batch32_ms": 905.27,
+    "onnx_size_mb": 133.3
+  }
 }

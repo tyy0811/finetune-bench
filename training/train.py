@@ -12,6 +12,8 @@ import mlflow
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.amp import autocast
+from torch.cuda.amp import GradScaler
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset
 from transformers import DistilBertTokenizer, get_cosine_schedule_with_warmup
@@ -19,6 +21,7 @@ from transformers import DistilBertTokenizer, get_cosine_schedule_with_warmup
 from evaluation.metrics import MetricsResult, compute_metrics
 from models.fusion_model import MultimodalClassifier
 from training.config import TrainConfig
+from training.gpu_profiler import GPUProfiler
 
 
 class ComplaintDataset(Dataset):
@@ -107,29 +110,48 @@ def train_one_epoch(
     config: TrainConfig,
     epoch: int,
     device: torch.device,
+    profiler: GPUProfiler | None = None,
+    scaler: GradScaler | None = None,
+    device_type: str = "cpu",
 ) -> float:
     """Train for one epoch. Returns average loss."""
     model.train()
     epoch_loss = 0.0
     num_batches = 0
 
+    use_scaler = scaler is not None
+
     for step, batch in enumerate(train_loader):
         text_inputs = {k: v.to(device) for k, v in batch["text"].items()}
         tabular_features = batch["tabular"].to(device)
         labels = batch["labels"].to(device)
 
-        logits = model(text_inputs, tabular_features)
-        loss = F.cross_entropy(logits, labels, weight=class_weights.to(device))
-        loss = loss / config.grad_accumulation_steps
+        with autocast(device_type=device_type, enabled=config.use_amp):
+            logits = model(text_inputs, tabular_features)
+            loss = F.cross_entropy(logits, labels, weight=class_weights.to(device))
+            loss = loss / config.grad_accumulation_steps
 
-        loss.backward()
+        if use_scaler:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
 
         if (step + 1) % config.grad_accumulation_steps == 0:
+            if use_scaler:
+                scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=config.max_grad_norm
             )
-            optimizer.step()
-            scheduler.step()
+            if use_scaler:
+                # Track optimizer step count to detect skipped steps
+                old_step = optimizer._step_count
+                scaler.step(optimizer)
+                scaler.update()
+                if optimizer._step_count > old_step:
+                    scheduler.step()
+            else:
+                optimizer.step()
+                scheduler.step()
             optimizer.zero_grad()
 
         batch_loss = loss.item() * config.grad_accumulation_steps
@@ -139,13 +161,25 @@ def train_one_epoch(
         global_step = epoch * len(train_loader) + step
         mlflow.log_metric("train_loss_step", batch_loss, step=global_step)
 
+        if profiler is not None:
+            profiler.on_step_end(epoch, step)
+
     # Flush any remaining accumulated gradients from incomplete final batch
     if (step + 1) % config.grad_accumulation_steps != 0:
+        if use_scaler:
+            scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(
             model.parameters(), max_norm=config.max_grad_norm
         )
-        optimizer.step()
-        scheduler.step()
+        if use_scaler:
+            old_step = optimizer._step_count
+            scaler.step(optimizer)
+            scaler.update()
+            if optimizer._step_count > old_step:
+                scheduler.step()
+        else:
+            optimizer.step()
+            scheduler.step()
         optimizer.zero_grad()
 
     return epoch_loss / max(num_batches, 1)
@@ -157,6 +191,8 @@ def evaluate(
     class_names: list[str],
     device: torch.device,
     return_probs: bool = False,
+    device_type: str = "cpu",
+    use_amp: bool = False,
 ) -> MetricsResult | tuple[MetricsResult, np.ndarray]:
     """Evaluate model on a data loader.
 
@@ -169,7 +205,8 @@ def evaluate(
         for batch in loader:
             text_inputs = {k: v.to(device) for k, v in batch["text"].items()}
             tabular_features = batch["tabular"].to(device)
-            logits = model(text_inputs, tabular_features)
+            with autocast(device_type=device_type, enabled=use_amp):
+                logits = model(text_inputs, tabular_features)
             all_preds.extend(logits.argmax(dim=-1).cpu().tolist())
             all_labels.extend(batch["labels"].tolist())
             if return_probs:
@@ -186,6 +223,13 @@ def train(config: TrainConfig) -> dict:
     """Full training pipeline. Returns test metrics dict."""
     _set_seeds(config.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # AMP: determine device type and disable if not CUDA
+    if torch.cuda.is_available():
+        device_type = "cuda"
+    else:
+        device_type = "cpu"
+        config.use_amp = False
 
     # Load data
     from adapters.cfpb import CFPBAdapter
@@ -281,6 +325,8 @@ def train(config: TrainConfig) -> dict:
     )
 
     early_stopper = EarlyStopper(patience=config.early_stopping_patience)
+    profiler = GPUProfiler(enabled=torch.cuda.is_available())
+    scaler = GradScaler(enabled=config.use_amp)
 
     results_dir = Path(config.results_dir)
     results_dir.mkdir(exist_ok=True)
@@ -293,11 +339,17 @@ def train(config: TrainConfig) -> dict:
 
         best_val_f1 = 0.0
         for epoch in range(config.num_epochs):
+            profiler.on_epoch_start(epoch)
             train_loss = train_one_epoch(
                 model, train_loader, optimizer, scheduler,
                 class_weights, config, epoch, device,
+                profiler=profiler, scaler=scaler, device_type=device_type,
             )
-            val_metrics = evaluate(model, val_loader, adapter.class_names, device)
+            profiler.on_epoch_end(epoch)
+            val_metrics = evaluate(
+                model, val_loader, adapter.class_names, device,
+                device_type=device_type, use_amp=config.use_amp,
+            )
 
             print(
                 f"Epoch {epoch + 1}/{config.num_epochs} | "
@@ -330,7 +382,10 @@ def train(config: TrainConfig) -> dict:
         if best_path.exists():
             model.load_state_dict(torch.load(best_path, weights_only=True))
 
-        test_metrics = evaluate(model, test_loader, adapter.class_names, device)
+        test_metrics = evaluate(
+            model, test_loader, adapter.class_names, device,
+            device_type=device_type, use_amp=config.use_amp,
+        )
         print(f"\nTest Macro-F1: {test_metrics.macro_f1:.4f}")
         print(f"Test Accuracy: {test_metrics.accuracy:.4f}")
         print(f"\n{test_metrics.report}")
@@ -339,6 +394,14 @@ def train(config: TrainConfig) -> dict:
             "test_macro_f1": test_metrics.macro_f1,
             "test_accuracy": test_metrics.accuracy,
         })
+
+        # Log GPU profiling metrics
+        gpu_summary = profiler.summary()
+        for key, value in gpu_summary.items():
+            if isinstance(value, str):
+                mlflow.log_param(f"gpu/{key}", value)
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                mlflow.log_metric(f"gpu/{key}", value)
 
         final_path = results_dir / f"{run_name}.pt"
         torch.save(model.state_dict(), final_path)
@@ -355,6 +418,7 @@ def train(config: TrainConfig) -> dict:
         "class_names": adapter.class_names,
         "variant": config.variant,
         "seed": config.seed,
+        "gpu": gpu_summary,
     }
 
 
@@ -366,6 +430,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sample-size", type=int, default=20000)
     parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--use-amp", action="store_true", help="Enable fp16 mixed-precision")
     args = parser.parse_args()
 
     cfg = TrainConfig(
@@ -373,5 +438,6 @@ if __name__ == "__main__":
         seed=args.seed,
         sample_size=args.sample_size,
         num_epochs=args.epochs,
+        use_amp=args.use_amp,
     )
     train(cfg)

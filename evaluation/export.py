@@ -59,6 +59,34 @@ def export_to_onnx(
     )
 
 
+def convert_onnx_to_fp16(input_path: str, output_path: str) -> None:
+    """Convert fp32 ONNX model to fp16, keeping fp32 IO for compatibility.
+
+    Pre-optimizes the fp32 model with ORT before conversion so that graph
+    fusions (e.g., SimplifiedLayerNormFusion) are already applied. This
+    prevents conflicts between inserted precision cast nodes and ORT's
+    optimization passes when loading the fp16 model.
+    """
+    import tempfile
+
+    import onnx
+    import onnxruntime as ort
+    from onnxruntime.transformers.float16 import convert_float_to_float16
+
+    # Apply ORT graph optimizations to the fp32 model first
+    sess_options = ort.SessionOptions()
+    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        optimized_path = os.path.join(tmpdir, "optimized.onnx")
+        sess_options.optimized_model_filepath = optimized_path
+        ort.InferenceSession(input_path, sess_options)
+
+        model_optimized = onnx.load(optimized_path)
+        model_fp16 = convert_float_to_float16(model_optimized, keep_io_types=True)
+        onnx.save(model_fp16, output_path)
+
+
 def benchmark_latency(
     model: MultimodalClassifier,
     onnx_path: str,
