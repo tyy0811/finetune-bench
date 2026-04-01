@@ -72,3 +72,7 @@ The model card is ~200 lines of Markdown. A single `MODEL_CARD_TEMPLATE` constan
 ## Design Decision #12: Model card sources from artifacts/ JSON, not MLflow
 
 All model card inputs are serialized to `artifacts/` as JSON files (data audit, DP results, MIA results). The model card generator reads from one directory with no MLflow client dependency. MLflow is the source of truth during training; `artifacts/` is the source of truth for documentation. This decouples the documentation pipeline from the experiment tracking system.
+
+## Design Decision #13: Frozen DistilBERT encoder for DP-SGD training
+
+Opacus 1.4 cannot compute per-sample gradients through DistilBERT's multi-head attention and LayerNorm layers — the backward hooks produce inconsistent gradient shapes across parameters. Freezing the encoder and DP-training only the tabular MLP + fusion head (66K trainable params) is the standard workaround documented by the Opacus team for transformer architectures. The privacy guarantee applies to the trained parameters; the frozen encoder acts as a fixed feature extractor. This is a meaningful limitation: the DP model cannot adapt the text representations, so its utility ceiling is lower than the non-DP baseline which fine-tunes the full model.

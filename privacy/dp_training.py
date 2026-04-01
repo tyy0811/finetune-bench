@@ -7,7 +7,6 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from privacy._batch import batch_size as get_batch_size
 from privacy._batch import forward_batch
 
 
@@ -123,14 +122,12 @@ def train_dp(
 
     model = model_class(*model_args).to(device)
 
-    # Validate and fix model for Opacus compatibility (replaces incompatible
-    # layers like LayerNorm with Opacus-compatible equivalents)
-    from opacus.validators import ModuleValidator
-
-    if not ModuleValidator.is_valid(model):
-        model = ModuleValidator.fix(model).to(device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    # Only parameters with requires_grad=True are DP-trained.
+    # For transformer models, freeze the encoder before calling train_dp —
+    # Opacus 1.4 cannot compute per-sample gradients through attention/LayerNorm.
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], lr=lr
+    )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 

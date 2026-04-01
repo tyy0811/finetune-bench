@@ -166,3 +166,92 @@ class TestTrainDp:
         )
         # Not asserting which is better — just that they differ
         assert r_loose["train_loss"] != r_strict["train_loss"]
+
+
+class TestTrainDpMultimodal:
+    """Integration test with the real MultimodalClassifier + ComplaintDataset.
+
+    Uses a tiny subset (32 train, 8 val) to validate the full Opacus wrapping
+    pipeline against the actual model architecture (DistilBERT + tabular MLP).
+    """
+
+    def test_multimodal_dp_training_completes(self):
+        pytest.importorskip("opacus")
+
+        import numpy as np
+        from transformers import DistilBertTokenizer
+
+        from models.fusion_model import MultimodalClassifier
+        from training.train import ComplaintDataset
+
+        tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+        num_classes = 3
+        tabular_dim = 5
+
+        # Tiny synthetic data matching ComplaintDataset format
+        train_narratives = [f"complaint about issue {i}" for i in range(32)]
+        val_narratives = [f"different complaint {i}" for i in range(8)]
+        train_tabular = np.random.randn(32, tabular_dim).astype(np.float32)
+        val_tabular = np.random.randn(8, tabular_dim).astype(np.float32)
+        train_labels = np.random.randint(0, num_classes, 32)
+        val_labels = np.random.randint(0, num_classes, 8)
+
+        train_ds = ComplaintDataset(
+            train_narratives, train_tabular, train_labels, tokenizer, max_length=32,
+        )
+        val_ds = ComplaintDataset(
+            val_narratives, val_tabular, val_labels, tokenizer, max_length=32,
+        )
+
+        # Flatten for Opacus (same approach as modal_privacy.py)
+        flat_train = torch.utils.data.TensorDataset(
+            train_ds.encodings["input_ids"],
+            train_ds.encodings["attention_mask"],
+            train_ds.tabular_features,
+            train_ds.labels,
+        )
+        flat_val = torch.utils.data.TensorDataset(
+            val_ds.encodings["input_ids"],
+            val_ds.encodings["attention_mask"],
+            val_ds.tabular_features,
+            val_ds.labels,
+        )
+
+        # Opacus-compatible wrapper (same as modal_privacy.py):
+        # - Flat tensor forward signature for Opacus hooks
+        # - Frozen encoder (Opacus 1.4 can't handle transformer per-sample grads)
+        class OpacusWrapper(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = MultimodalClassifier(
+                    num_classes=num_classes,
+                    tabular_input_dim=tabular_dim,
+                    text_model_name="distilbert-base-uncased",
+                )
+                for p in self.inner.text_encoder.parameters():
+                    p.requires_grad = False
+
+            def forward(self, input_ids, attention_mask, tabular):
+                text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+                return self.inner(text_inputs, tabular)
+
+        result = train_dp(
+            model_class=OpacusWrapper,
+            model_args=(),
+            train_dataset=flat_train,
+            val_dataset=flat_val,
+            num_classes=num_classes,
+            epochs=1,
+            batch_size=8,
+            lr=2e-5,
+            epsilon=50.0,
+            delta=1e-5,
+            max_grad_norm=1.0,
+            device="cpu",
+        )
+
+        assert "epsilon_actual" in result
+        assert result["epsilon_actual"] > 0
+        assert "val_macro_f1" in result
+        assert "model_state_dict" in result
+        assert result["train_loss"] > 0

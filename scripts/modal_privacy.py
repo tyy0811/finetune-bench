@@ -133,6 +133,10 @@ class _OpacusMultimodalWrapper(torch.nn.Module):
     def __init__(self, inner):
         super().__init__()
         self.inner = inner
+        # Freeze DistilBERT — Opacus 1.4 cannot compute per-sample
+        # gradients through transformer attention/LayerNorm
+        for p in self.inner.text_encoder.parameters():
+            p.requires_grad = False
 
     def forward(self, input_ids, attention_mask, tabular):
         text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
