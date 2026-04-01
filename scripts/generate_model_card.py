@@ -263,6 +263,66 @@ def generate_model_card(
     return card
 
 
+def _load_baseline_from_results() -> dict | None:
+    """Build baseline_data from the repo's existing results files.
+
+    Reads results/all_results.json (M1/M2/M3 with per-seed runs) and
+    results/v2_results.json (M2b single run). Aggregates per-seed entries
+    into mean +/- std.
+    """
+    from collections import defaultdict
+
+    import numpy as np
+
+    results_dir = Path("results")
+    all_path = results_dir / "all_results.json"
+    if not all_path.exists():
+        return None
+
+    all_results = json.loads(all_path.read_text())
+
+    # Aggregate DL variants (M1, M2, M3) by variant across seeds
+    variant_f1s: dict[str, list[float]] = defaultdict(list)
+    for r in all_results:
+        if "epochs" in r and r["variant"] in ("M1", "M2", "M3"):
+            variant_f1s[r["variant"]].append(r["epochs"][-1]["val_macro_f1"])
+
+    variant_notes = {
+        "M1": "DistilBERT baseline",
+        "M2": "Multimodal fusion",
+        "M3": "Fusion + modality dropout",
+    }
+
+    baseline_entries = []
+    for variant in ("M1", "M2", "M3"):
+        if variant in variant_f1s:
+            f1s = variant_f1s[variant]
+            entry = {
+                "variant": variant,
+                "val_macro_f1": round(float(np.mean(f1s)), 4),
+                "notes": variant_notes.get(variant, ""),
+            }
+            if len(f1s) > 1:
+                entry["val_macro_f1_std"] = round(float(np.std(f1s)), 4)
+            baseline_entries.append(entry)
+
+    # Add M2b from v2_results.json if available
+    v2_path = results_dir / "v2_results.json"
+    if v2_path.exists():
+        v2 = json.loads(v2_path.read_text())
+        if "m2b" in v2:
+            baseline_entries.append({
+                "variant": "M2b (no company)",
+                "val_macro_f1": round(v2["m2b"]["test_macro_f1"], 4),
+                "notes": "Fusion without company features",
+            })
+
+    if not baseline_entries:
+        return None
+
+    return {"results": baseline_entries}
+
+
 def main() -> None:
     """Generate model card from artifacts/ directory."""
     artifacts = Path("artifacts")
@@ -271,8 +331,12 @@ def main() -> None:
     dp = json.loads((artifacts / "dp_results.json").read_text())
     mia = json.loads((artifacts / "mia_results.json").read_text())
 
+    # Try artifacts/baseline_results.json first, fall back to results/ files
     baseline_path = artifacts / "baseline_results.json"
-    baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else None
+    if baseline_path.exists():
+        baseline = json.loads(baseline_path.read_text())
+    else:
+        baseline = _load_baseline_from_results()
 
     output = artifacts / "model_card.md"
     generate_model_card(audit, dp, mia, output_path=output, baseline_data=baseline)
