@@ -79,6 +79,26 @@ def _collect_gradient_norms(model: torch.nn.Module) -> dict[str, float]:
     return norms
 
 
+def _forward_batch(
+    model: torch.nn.Module, batch: tuple | dict, device: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Unpack a batch and run the model forward pass.
+
+    Supports two batch formats:
+    - Tuple/list: (inputs, labels) — used by TensorDataset
+    - Dict with 'text', 'tabular', 'labels' keys — used by ComplaintDataset
+    """
+    if isinstance(batch, dict):
+        text_inputs = {k: v.to(device) for k, v in batch["text"].items()}
+        tabular = batch["tabular"].to(device)
+        labels = batch["labels"].to(device)
+        logits = model(text_inputs, tabular)
+    else:
+        inputs, labels = batch[0].to(device), batch[1].to(device)
+        logits = model(inputs)
+    return logits, labels
+
+
 def train_dp(
     model_class: type,
     model_args: tuple,
@@ -129,11 +149,10 @@ def train_dp(
         step_count = 0
 
         for batch in dp_loader:
-            inputs, labels = batch[0].to(device), batch[1].to(device)
+            logits, labels = _forward_batch(dp_model, batch, device)
             # Poisson sampling can yield empty batches — skip them
-            if inputs.shape[0] == 0:
+            if labels.shape[0] == 0:
                 continue
-            logits = dp_model(inputs)
             loss = torch.nn.functional.cross_entropy(logits, labels)
             loss.backward()
 
@@ -156,8 +175,7 @@ def train_dp(
     all_labels = []
     with torch.no_grad():
         for batch in val_loader:
-            inputs, labels = batch[0].to(device), batch[1].to(device)
-            logits = dp_model(inputs)
+            logits, labels = _forward_batch(dp_model, batch, device)
             preds = logits.argmax(dim=1)
             all_preds.extend(preds.cpu().tolist())
             all_labels.extend(labels.cpu().tolist())
