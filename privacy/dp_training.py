@@ -59,6 +59,7 @@ def create_dp_training_components(
         target_epsilon=epsilon,
         target_delta=delta,
         max_grad_norm=max_grad_norm,
+        grad_sample_mode="ew",  # hooks-based; handles transformers correctly
     )
     return dp_model, dp_optimizer, dp_loader, privacy_engine
 
