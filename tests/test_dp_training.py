@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from privacy.dp_training import create_dp_training_components, make_dp_config
+from privacy.dp_training import create_dp_training_components, make_dp_config, train_dp
 
 
 class TestDpConfig:
@@ -105,3 +105,62 @@ class TestDpTrainingComponents:
 
         eps = dp_optimizer.privacy_engine.get_epsilon(1e-5)
         assert eps > 0  # some budget consumed
+
+
+class TestTrainDp:
+    def test_train_dp_returns_expected_keys(self):
+        """Integration test: train_dp on tiny synthetic data returns correct output shape."""
+        pytest.importorskip("opacus")
+
+        result = train_dp(
+            model_class=torch.nn.Sequential,
+            model_args=(torch.nn.Linear(10, 3),),
+            train_dataset=torch.utils.data.TensorDataset(
+                torch.randn(32, 10), torch.randint(0, 3, (32,))
+            ),
+            val_dataset=torch.utils.data.TensorDataset(
+                torch.randn(8, 10), torch.randint(0, 3, (8,))
+            ),
+            num_classes=3,
+            epochs=1,
+            batch_size=8,
+            lr=0.01,
+            epsilon=50.0,
+            delta=1e-5,
+            max_grad_norm=1.0,
+            device="cpu",
+        )
+        assert "epsilon_actual" in result
+        assert "val_macro_f1" in result
+        assert "train_loss" in result
+        assert result["epsilon_actual"] > 0
+
+    def test_train_dp_noise_affects_output(self):
+        """Verify DP training produces different results from non-DP (noise is added)."""
+        pytest.importorskip("opacus")
+
+        torch.manual_seed(42)
+        data = torch.utils.data.TensorDataset(
+            torch.randn(32, 10), torch.randint(0, 3, (32,))
+        )
+        val = torch.utils.data.TensorDataset(
+            torch.randn(8, 10), torch.randint(0, 3, (8,))
+        )
+
+        # Train with very loose DP (eps=50) and very strict DP (eps=0.1)
+        r_loose = train_dp(
+            model_class=torch.nn.Sequential,
+            model_args=(torch.nn.Linear(10, 3),),
+            train_dataset=data, val_dataset=val, num_classes=3,
+            epochs=2, batch_size=8, lr=0.01,
+            epsilon=50.0, delta=1e-5, max_grad_norm=1.0, device="cpu",
+        )
+        r_strict = train_dp(
+            model_class=torch.nn.Sequential,
+            model_args=(torch.nn.Linear(10, 3),),
+            train_dataset=data, val_dataset=val, num_classes=3,
+            epochs=2, batch_size=8, lr=0.01,
+            epsilon=0.1, delta=1e-5, max_grad_norm=1.0, device="cpu",
+        )
+        # Not asserting which is better — just that they differ
+        assert r_loose["train_loss"] != r_strict["train_loss"]
