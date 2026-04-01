@@ -54,12 +54,7 @@ phones: {residual_pii_phones}, SSNs: {residual_pii_ssns})
 
 **Baseline performance (no DP):**
 
-| Variant | Macro-F1 | Notes |
-|---------|----------|-------|
-| M1 (text-only) | 0.6236 +/- 0.0047 | DistilBERT baseline |
-| M2 (fusion) | 0.6555 +/- 0.0076 | +3.2pp from fusion |
-| M3 (fusion+dropout) | 0.6605 +/- 0.0053 | +0.5pp from modality dropout |
-| M2b (no company) | 0.6189 | Fusion gain disappears without company features |
+{baseline_results_table}
 
 **Privacy-utility tradeoff (DP-SGD):**
 
@@ -119,6 +114,21 @@ accuracy is acceptable for the use case before deploying
 - **Re-training triggers:** New product categories, regulatory changes affecting complaint \
 language, >2pp drop in population-level Macro-F1
 """
+
+
+def _format_baseline_table(baseline_data: dict) -> str:
+    """Format baseline (non-DP) results as a Markdown table."""
+    rows = [
+        "| Variant | Macro-F1 | Notes |",
+        "|---------|----------|-------|",
+    ]
+    for r in baseline_data["results"]:
+        f1_str = f"{r['val_macro_f1']:.4f}"
+        if "val_macro_f1_std" in r:
+            f1_str += f" +/- {r['val_macro_f1_std']:.4f}"
+        notes = r.get("notes", "")
+        rows.append(f"| {r['variant']} | {f1_str} | {notes} |")
+    return "\n".join(rows)
 
 
 def _format_dp_table(dp_data: dict) -> str:
@@ -216,8 +226,14 @@ def generate_model_card(
     dp_data: dict,
     mia_data: dict,
     output_path: Path | None = None,
+    baseline_data: dict | None = None,
 ) -> str:
-    """Generate a model card from audit, DP, and MIA results."""
+    """Generate a model card from audit, DP, MIA, and baseline results."""
+    if baseline_data is not None:
+        baseline_table = _format_baseline_table(baseline_data)
+    else:
+        baseline_table = "*No baseline results provided.*"
+
     card = MODEL_CARD_TEMPLATE.format(
         total_samples=audit_data["total_samples"],
         audit_assessment=audit_data["assessment"],
@@ -232,6 +248,7 @@ def generate_model_card(
         near_duplicate_method=audit_data["near_duplicates"]["method"],
         short_threshold=audit_data["short_narratives"]["threshold_tokens"],
         short_count=audit_data["short_narratives"]["count"],
+        baseline_results_table=baseline_table,
         dp_results_table=_format_dp_table(dp_data),
         dp_results_table_privacy=_format_dp_table(dp_data),
         mia_results_table=_format_mia_table(mia_data),
@@ -254,8 +271,11 @@ def main() -> None:
     dp = json.loads((artifacts / "dp_results.json").read_text())
     mia = json.loads((artifacts / "mia_results.json").read_text())
 
+    baseline_path = artifacts / "baseline_results.json"
+    baseline = json.loads(baseline_path.read_text()) if baseline_path.exists() else None
+
     output = artifacts / "model_card.md"
-    generate_model_card(audit, dp, mia, output_path=output)
+    generate_model_card(audit, dp, mia, output_path=output, baseline_data=baseline)
     print(f"Model card written to {output}")
 
 

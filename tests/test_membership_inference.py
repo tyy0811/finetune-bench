@@ -143,3 +143,42 @@ class TestPerSampleLoss:
 
         losses = compute_per_sample_loss(model, dataset, batch_size=8, device="cpu")
         assert np.mean(losses) < 0.5  # should be very low after overfitting
+
+    def test_dict_batch_format(self):
+        """Verify compute_per_sample_loss handles dict-style batches (ComplaintDataset)."""
+
+        class DictDataset(torch.utils.data.Dataset):
+            def __init__(self, n=16):
+                self.input_ids = torch.randint(0, 100, (n, 8))
+                self.attention_mask = torch.ones(n, 8, dtype=torch.long)
+                self.tabular = torch.randn(n, 4)
+                self.labels = torch.randint(0, 3, (n,))
+
+            def __len__(self):
+                return len(self.labels)
+
+            def __getitem__(self, idx):
+                return {
+                    "text": {
+                        "input_ids": self.input_ids[idx],
+                        "attention_mask": self.attention_mask[idx],
+                    },
+                    "tabular": self.tabular[idx],
+                    "labels": self.labels[idx],
+                }
+
+        class DualInputModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.text_proj = torch.nn.Linear(8, 4)
+                self.head = torch.nn.Linear(8, 3)
+
+            def forward(self, text_inputs, tabular):
+                text_feat = self.text_proj(text_inputs["input_ids"].float())
+                return self.head(torch.cat([text_feat, tabular], dim=1))
+
+        model = DualInputModel()
+        dataset = DictDataset(n=16)
+        losses = compute_per_sample_loss(model, dataset, batch_size=4, device="cpu")
+        assert len(losses) == 16
+        assert all(loss >= 0 for loss in losses)
