@@ -99,9 +99,14 @@ def detect_near_duplicates(texts: list[str]) -> dict:
     return {"count": duplicate_count, "method": "exact_normalized"}
 
 
+def _normalize_column_name(name: str) -> str:
+    """Lowercase and replace spaces/hyphens with underscores."""
+    return re.sub(r"[\s-]+", "_", name.lower())
+
+
 def inventory_sensitive_columns(columns: list[str]) -> list[str]:
     """Flag column names that could serve as protected attributes."""
-    return sorted(col for col in columns if col.lower() in _SENSITIVE_COLUMN_NAMES)
+    return sorted(col for col in columns if _normalize_column_name(col) in _SENSITIVE_COLUMN_NAMES)
 
 
 @dataclass

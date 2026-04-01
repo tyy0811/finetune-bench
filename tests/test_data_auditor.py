@@ -116,6 +116,13 @@ class TestSensitiveColumnInventory:
         assert "state" in result
         assert "submitted_via" in result
 
+    def test_flags_raw_cfpb_headers_with_spaces(self):
+        columns = ["Consumer complaint narrative", "Company", "State", "Submitted via", "Product"]
+        result = inventory_sensitive_columns(columns)
+        assert "Company" in result
+        assert "State" in result
+        assert "Submitted via" in result
+
     def test_does_not_flag_non_sensitive(self):
         columns = ["narrative", "product"]
         result = inventory_sensitive_columns(columns)
