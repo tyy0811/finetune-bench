@@ -58,12 +58,24 @@ SEEDS = [42, 123, 456]
 def _setup_remote():
     """Common setup for Modal remote functions."""
     import os
+    import shutil
     import subprocess
     import sys
 
     os.chdir("/root/finetune-bench")
     sys.path.insert(0, "/root/finetune-bench")
     subprocess.run(["pip", "install", "-e", "."], capture_output=True)
+
+    # Ensure CFPB data is available (check volume cache, download if needed)
+    data_dir = "/data/complaints.csv"
+    local_data = "data/complaints.csv"
+    os.makedirs("data", exist_ok=True)
+    if os.path.exists(data_dir):
+        os.symlink(data_dir, local_data)
+    else:
+        subprocess.run(["python", "scripts/download_data.py"], check=True)
+        shutil.copy(local_data, data_dir)
+        vol.commit()
 
 
 def _build_datasets(splits, config):
