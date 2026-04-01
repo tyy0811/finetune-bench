@@ -1,10 +1,12 @@
 """Tests for privacy.membership_inference module."""
 
 import numpy as np
+import torch
 
 from privacy.membership_inference import (
     balance_member_nonmember,
     compute_mia_auc,
+    compute_per_sample_loss,
     stratified_mia_by_entity,
 )
 
@@ -103,3 +105,41 @@ class TestStratifiedMia:
         )
         assert result["high_freq_count"] == 2  # two BigCo members
         assert result["low_freq_count"] == 2   # two SmallCo members
+
+
+class TestPerSampleLoss:
+    def test_returns_one_loss_per_sample(self):
+        model = torch.nn.Linear(10, 3)
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(16, 10), torch.randint(0, 3, (16,))
+        )
+        losses = compute_per_sample_loss(model, dataset, batch_size=4, device="cpu")
+        assert len(losses) == 16
+
+    def test_losses_are_positive(self):
+        model = torch.nn.Linear(10, 3)
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(8, 10), torch.randint(0, 3, (8,))
+        )
+        losses = compute_per_sample_loss(model, dataset, batch_size=4, device="cpu")
+        assert all(loss > 0 for loss in losses)
+
+    def test_overfit_model_has_low_loss_on_train(self):
+        """A model overfit to its training data should have low loss on that data."""
+        torch.manual_seed(42)
+        model = torch.nn.Linear(10, 3)
+        data_x = torch.randn(8, 10)
+        data_y = torch.randint(0, 3, (8,))
+        dataset = torch.utils.data.TensorDataset(data_x, data_y)
+
+        # Overfit
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+        for _ in range(200):
+            logits = model(data_x)
+            loss = torch.nn.functional.cross_entropy(logits, data_y)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+        losses = compute_per_sample_loss(model, dataset, batch_size=8, device="cpu")
+        assert np.mean(losses) < 0.5  # should be very low after overfitting

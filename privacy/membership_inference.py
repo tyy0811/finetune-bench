@@ -5,7 +5,9 @@ from __future__ import annotations
 import random
 
 import numpy as np
+import torch
 from sklearn.metrics import roc_auc_score
+from torch.utils.data import DataLoader, Dataset
 
 
 def balance_member_nonmember(
@@ -99,3 +101,32 @@ def stratified_mia_by_entity(
         result["low_freq_company_auc"] = None
 
     return result
+
+
+def compute_per_sample_loss(
+    model: torch.nn.Module,
+    dataset: Dataset,
+    batch_size: int = 32,
+    device: str = "cpu",
+) -> list[float]:
+    """Compute cross-entropy loss for each sample in the dataset.
+
+    Model must accept dataset[i][0] as input and return logits.
+    dataset[i][1] must be the integer label.
+    """
+    model = model.to(device)
+    model.eval()
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    all_losses: list[float] = []
+
+    with torch.no_grad():
+        for batch in loader:
+            inputs, labels = batch[0].to(device), batch[1].to(device)
+            logits = model(inputs)
+            # Per-sample loss (no reduction)
+            losses = torch.nn.functional.cross_entropy(
+                logits, labels, reduction="none"
+            )
+            all_losses.extend(losses.cpu().tolist())
+
+    return all_losses
