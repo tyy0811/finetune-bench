@@ -29,7 +29,7 @@ image = (
         "numpy==1.26.4",
         "mlflow==3.10.1",
         "pydantic==2.12.5",
-        "opacus>=1.4.0",
+        "opacus==1.4.1",
         "requests==2.32.5",
     )
     .add_local_dir(
