@@ -1,7 +1,5 @@
 """Tests for privacy.data_auditor module."""
 
-import pytest
-
 from privacy.data_auditor import detect_redaction_markers, scan_residual_pii
 
 

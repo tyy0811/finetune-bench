@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 
 # CFPB redaction patterns — verified empirically from complaint narratives.
 # XX/XX/XXXX must match before XXXX to avoid partial overlap.
