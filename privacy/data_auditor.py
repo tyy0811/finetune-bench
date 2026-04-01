@@ -173,3 +173,34 @@ def run_audit(
         output_path.write_text(json.dumps(report, indent=2))
 
     return report
+
+
+def main() -> None:
+    """Run audit on the CFPB dataset and write report to artifacts/."""
+    from adapters.cfpb import CFPBAdapter
+
+    adapter = CFPBAdapter(sample_size=20_000, seed=42)
+    splits = adapter.preprocess()
+
+    all_narratives = (
+        splits["train"]["narratives"]
+        + splits["val"]["narratives"]
+        + splits["test"]["narratives"]
+    )
+
+    # CFPB columns that are used for feature engineering
+    columns = ["company", "state", "submitted_via"]
+
+    output_path = Path("artifacts/data_audit_report.json")
+    report = run_audit(all_narratives, columns, output_path=output_path)
+
+    print(f"Audit complete: {report['total_samples']} samples scanned")
+    print(f"  Redaction markers: {report['redaction_markers']['count']}")
+    print(f"  Residual PII: {report['residual_pii']['total']}")
+    print(f"  Near-duplicates: {report['near_duplicates']['count']}")
+    print(f"  Assessment: {report['assessment']}")
+    print(f"  Report written to: {output_path}")
+
+
+if __name__ == "__main__":
+    main()
