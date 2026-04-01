@@ -48,3 +48,54 @@ def compute_mia_auc(
         "test_loss_mean": round(test_mean, 4),
         "loss_gap": round(test_mean - train_mean, 4),
     }
+
+
+def stratified_mia_by_entity(
+    member_losses: list[float],
+    member_companies: list[str],
+    nonmember_losses: list[float],
+    company_train_counts: dict[str, int],
+    top_n: int = 10,
+) -> dict:
+    """Run MIA separately on high-frequency and low-frequency company subgroups.
+
+    This tests whether entity memorization (Finding #7) drives the MIA signal.
+    High-frequency companies appear often in training -> model may memorize them more.
+    """
+    # Identify top-N companies by training count
+    sorted_companies = sorted(company_train_counts.items(), key=lambda x: x[1], reverse=True)
+    high_freq_set = {name for name, _ in sorted_companies[:top_n]}
+
+    high_freq_losses = []
+    low_freq_losses = []
+    for loss, company in zip(member_losses, member_companies):
+        if company in high_freq_set:
+            high_freq_losses.append(loss)
+        else:
+            low_freq_losses.append(loss)
+
+    result: dict = {
+        "high_freq_count": len(high_freq_losses),
+        "low_freq_count": len(low_freq_losses),
+    }
+
+    # Need at least 2 samples in each stratum + nonmembers for AUC
+    if len(high_freq_losses) >= 2 and len(nonmember_losses) >= 2:
+        balanced_hf, balanced_nm = balance_member_nonmember(
+            high_freq_losses, nonmember_losses
+        )
+        hf_result = compute_mia_auc(balanced_hf, balanced_nm)
+        result["high_freq_company_auc"] = hf_result["mia_auc"]
+    else:
+        result["high_freq_company_auc"] = None
+
+    if len(low_freq_losses) >= 2 and len(nonmember_losses) >= 2:
+        balanced_lf, balanced_nm = balance_member_nonmember(
+            low_freq_losses, nonmember_losses
+        )
+        lf_result = compute_mia_auc(balanced_lf, balanced_nm)
+        result["low_freq_company_auc"] = lf_result["mia_auc"]
+    else:
+        result["low_freq_company_auc"] = None
+
+    return result

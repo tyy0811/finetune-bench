@@ -2,7 +2,11 @@
 
 import numpy as np
 
-from privacy.membership_inference import balance_member_nonmember, compute_mia_auc
+from privacy.membership_inference import (
+    balance_member_nonmember,
+    compute_mia_auc,
+    stratified_mia_by_entity,
+)
 
 
 class TestComputeMiaAuc:
@@ -63,3 +67,39 @@ class TestBalanceMemberNonmember:
         r1 = balance_member_nonmember(members, nonmembers, seed=42)
         r2 = balance_member_nonmember(members, nonmembers, seed=42)
         assert r1[0] == r2[0]
+
+
+class TestStratifiedMia:
+    def test_splits_by_company_frequency(self):
+        member_losses = [0.1, 0.2, 0.8, 0.9, 0.3, 0.4]
+        member_companies = ["BigCo", "BigCo", "SmallCo", "SmallCo", "BigCo", "TinyCo"]
+        nonmember_losses = [0.5, 0.6, 0.7, 0.8, 0.5, 0.6]
+        company_counts = {"BigCo": 5000, "SmallCo": 100, "TinyCo": 50}
+
+        result = stratified_mia_by_entity(
+            member_losses=member_losses,
+            member_companies=member_companies,
+            nonmember_losses=nonmember_losses,
+            company_train_counts=company_counts,
+            top_n=1,
+        )
+        assert "high_freq_company_auc" in result
+        assert "low_freq_company_auc" in result
+        assert "high_freq_count" in result
+        assert "low_freq_count" in result
+
+    def test_high_freq_count_is_correct(self):
+        member_losses = [0.1, 0.2, 0.3, 0.4]
+        member_companies = ["BigCo", "BigCo", "SmallCo", "SmallCo"]
+        nonmember_losses = [0.5, 0.6]
+        company_counts = {"BigCo": 5000, "SmallCo": 100}
+
+        result = stratified_mia_by_entity(
+            member_losses=member_losses,
+            member_companies=member_companies,
+            nonmember_losses=nonmember_losses,
+            company_train_counts=company_counts,
+            top_n=1,
+        )
+        assert result["high_freq_count"] == 2  # two BigCo members
+        assert result["low_freq_count"] == 2   # two SmallCo members
