@@ -63,3 +63,38 @@ def scan_residual_pii(texts: list[str]) -> dict:
         "ssns": ssns,
         "total": emails + phones + ssns,
     }
+
+
+# Columns that could serve as protected attributes or proxy variables.
+_SENSITIVE_COLUMN_NAMES = {
+    "company", "state", "submitted_via", "zip_code",
+    "ethnicity", "race", "gender", "age",
+}
+
+
+def _normalize_text(text: str) -> str:
+    """Lowercase, collapse whitespace, strip punctuation."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def detect_near_duplicates(texts: list[str]) -> dict:
+    """Find exact duplicates after text normalization.
+
+    Returns dict with 'count' (number of duplicate pairs) and 'method'.
+    """
+    from collections import Counter
+
+    seen: dict[str, int] = Counter()
+    for text in texts:
+        seen[_normalize_text(text)] += 1
+
+    duplicate_count = sum(count - 1 for count in seen.values() if count > 1)
+    return {"count": duplicate_count, "method": "exact_normalized"}
+
+
+def inventory_sensitive_columns(columns: list[str]) -> list[str]:
+    """Flag column names that could serve as protected attributes."""
+    return sorted(col for col in columns if col.lower() in _SENSITIVE_COLUMN_NAMES)

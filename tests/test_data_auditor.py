@@ -1,6 +1,11 @@
 """Tests for privacy.data_auditor module."""
 
-from privacy.data_auditor import detect_redaction_markers, scan_residual_pii
+from privacy.data_auditor import (
+    detect_near_duplicates,
+    detect_redaction_markers,
+    inventory_sensitive_columns,
+    scan_residual_pii,
+)
 
 
 class TestRedactionMarkerDetection:
@@ -66,3 +71,47 @@ class TestResidualPiiScan:
     def test_empty_input(self):
         result = scan_residual_pii([])
         assert result["total"] == 0
+
+
+class TestNearDuplicateDetection:
+    def test_exact_duplicates_detected(self):
+        texts = ["complaint about fees", "complaint about fees", "different complaint"]
+        result = detect_near_duplicates(texts)
+        assert result["count"] >= 1
+
+    def test_normalized_duplicates_detected(self):
+        texts = [
+            "Complaint about  fees!",
+            "complaint about fees",
+        ]
+        result = detect_near_duplicates(texts)
+        assert result["count"] >= 1
+
+    def test_no_duplicates(self):
+        texts = ["first complaint", "second complaint", "third complaint"]
+        result = detect_near_duplicates(texts)
+        assert result["count"] == 0
+
+    def test_method_is_exact_normalized(self):
+        texts = ["a", "b"]
+        result = detect_near_duplicates(texts)
+        assert result["method"] == "exact_normalized"
+
+
+class TestSensitiveColumnInventory:
+    def test_flags_known_sensitive_columns(self):
+        columns = ["narrative", "company", "state", "submitted_via", "product"]
+        result = inventory_sensitive_columns(columns)
+        assert "company" in result
+        assert "state" in result
+        assert "submitted_via" in result
+
+    def test_does_not_flag_non_sensitive(self):
+        columns = ["narrative", "product"]
+        result = inventory_sensitive_columns(columns)
+        assert "narrative" not in result
+        assert "product" not in result
+
+    def test_empty_columns(self):
+        result = inventory_sensitive_columns([])
+        assert result == []
