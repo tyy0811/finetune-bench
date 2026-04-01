@@ -213,20 +213,22 @@ def run_membership_inference_attack(
     mia_result = compute_mia_auc(balanced_m, balanced_nm)
 
     # Stratified analysis by company frequency
-    company_counts = {}
-    for company in splits["train"].get("companies", []):
+    train_companies = splits["train"]["companies"]
+    assert len(train_companies) == len(member_losses), (
+        f"Company label count ({len(train_companies)}) != member loss count "
+        f"({len(member_losses)}). CFPBAdapter must include 'companies' in splits."
+    )
+
+    company_counts: dict[str, int] = {}
+    for company in train_companies:
         company_counts[company] = company_counts.get(company, 0) + 1
 
-    stratified = {}
-    if company_counts:
-        train_companies = splits["train"].get("companies", [])
-        if len(train_companies) == len(member_losses):
-            stratified = stratified_mia_by_entity(
-                member_losses=member_losses,
-                member_companies=train_companies,
-                nonmember_losses=nonmember_losses,
-                company_train_counts=company_counts,
-            )
+    stratified = stratified_mia_by_entity(
+        member_losses=member_losses,
+        member_companies=train_companies,
+        nonmember_losses=nonmember_losses,
+        company_train_counts=company_counts,
+    )
 
     return {
         "model": config_name,

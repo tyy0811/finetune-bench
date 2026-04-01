@@ -155,6 +155,7 @@ class CFPBAdapter(DatasetAdapter):
                 "narratives": split_df["narrative"].tolist(),
                 "tabular_features": features,
                 "labels": split_df["label"].values,
+                "companies": split_df["Company"].tolist(),
             }
 
         return result

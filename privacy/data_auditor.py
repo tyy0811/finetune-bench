@@ -187,7 +187,9 @@ def main() -> None:
     columns = ["company", "state", "submitted_via"]
 
     output_path = Path("artifacts/data_audit_report.json")
-    report = run_audit(all_narratives, columns, output_path=output_path)
+    report = run_audit(
+        all_narratives, columns, output_path=output_path, max_residual_pii=0,
+    )
 
     print(f"Audit complete: {report['total_samples']} samples scanned")
     print(f"  Redaction markers: {report['redaction_markers']['count']}")
@@ -195,6 +197,15 @@ def main() -> None:
     print(f"  Near-duplicates: {report['near_duplicates']['count']}")
     print(f"  Assessment: {report['assessment']}")
     print(f"  Report written to: {output_path}")
+
+    if not report.get("gate_passed", True):
+        pii = report["residual_pii"]
+        print(
+            f"\nERROR: PII gate FAILED — {pii['total']} residual PII found "
+            f"(emails: {pii['emails']}, phones: {pii['phones']}, SSNs: {pii['ssns']}). "
+            f"Review and remediate before training."
+        )
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

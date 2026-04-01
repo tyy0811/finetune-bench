@@ -202,11 +202,17 @@ def _mia_interpretation(mia_data: dict) -> str:
             f"indicating {'significant' if no_dp[0]['mia_auc'] > 0.65 else 'moderate'} "
             f"memorization of training data."
         )
-    if dp:
+    if dp and no_dp:
         lowest_auc = min(r["mia_auc"] for r in dp)
         parts.append(
             f"DP training reduces MIA AUC to {lowest_auc:.2f}, "
             f"{'approaching random guess (0.50)' if lowest_auc < 0.55 else 'showing reduced but non-trivial memorization'}."
+        )
+    elif dp:
+        lowest_auc = min(r["mia_auc"] for r in dp)
+        parts.append(
+            f"DP models show MIA AUC of {lowest_auc:.2f}. "
+            f"No non-DP baseline was provided for comparison."
         )
 
     # Check stratified results

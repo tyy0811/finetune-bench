@@ -82,6 +82,18 @@ def _collect_gradient_norms(model: torch.nn.Module) -> dict[str, float]:
     return norms
 
 
+def _compute_class_weights(labels: list[int] | torch.Tensor, num_classes: int) -> torch.Tensor:
+    """Inverse-frequency class weights, matching the baseline training recipe."""
+    import numpy as np
+
+    if isinstance(labels, torch.Tensor):
+        labels = labels.numpy()
+    counts = np.bincount(labels, minlength=num_classes).astype(float)
+    counts[counts == 0] = 1.0
+    weights = len(labels) / (num_classes * counts)
+    return torch.tensor(weights, dtype=torch.float32)
+
+
 def train_dp(
     model_class: type,
     model_args: tuple,
@@ -100,8 +112,9 @@ def train_dp(
     """Train a model with Opacus DP-SGD and return metrics.
 
     This is a self-contained training loop — AMP disabled, no gradient
-    accumulation, single learning rate. Designed for correct privacy
-    accounting with minimal interaction effects.
+    accumulation, single learning rate. Uses the same inverse-frequency
+    class weighting as the baseline to ensure the privacy/utility
+    tradeoff reflects DP effects, not a change in optimization target.
     """
     from evaluation.metrics import compute_metrics
 
@@ -111,6 +124,14 @@ def train_dp(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
+
+    # Extract labels for class weight computation
+    all_train_labels = []
+    for i in range(len(train_dataset)):
+        item = train_dataset[i]
+        label = item["labels"] if isinstance(item, dict) else item[1]
+        all_train_labels.append(int(label))
+    class_weights = _compute_class_weights(all_train_labels, num_classes).to(device)
 
     dp_model, dp_optimizer, dp_loader, privacy_engine = create_dp_training_components(
         model=model,
@@ -136,7 +157,7 @@ def train_dp(
             if get_batch_size(batch) == 0:
                 continue
             logits, labels = forward_batch(dp_model, batch, device)
-            loss = torch.nn.functional.cross_entropy(logits, labels)
+            loss = torch.nn.functional.cross_entropy(logits, labels, weight=class_weights)
             loss.backward()
 
             grad_norms = _collect_gradient_norms(dp_model)
