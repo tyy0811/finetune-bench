@@ -59,7 +59,7 @@ def create_dp_training_components(
         target_epsilon=epsilon,
         target_delta=delta,
         max_grad_norm=max_grad_norm,
-        grad_sample_mode="hooks",  # per-sample gradient via hooks; most compatible
+        poisson_sampling=False,  # fixed batch size; avoids grad_sample shape mismatch
     )
     return dp_model, dp_optimizer, dp_loader, privacy_engine
 
@@ -162,9 +162,6 @@ def train_dp(
         step_count = 0
 
         for batch in dp_loader:
-            # Poisson sampling can yield empty batches — skip before forward pass
-            if get_batch_size(batch) == 0:
-                continue
             logits, labels = forward_batch(dp_model, batch, device)
             loss = torch.nn.functional.cross_entropy(logits, labels, weight=class_weights)
             loss.backward()
