@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Dataset
+
+from privacy._batch import forward_batch
 
 
 def balance_member_nonmember(
@@ -103,30 +107,12 @@ def stratified_mia_by_entity(
     return result
 
 
-def _default_forward(model: torch.nn.Module, batch: tuple | dict, device: str) -> tuple:
-    """Extract (logits, labels) from a batch using the model.
-
-    Supports two batch formats:
-    - Tuple/list: (inputs, labels) — used by TensorDataset
-    - Dict with 'text', 'tabular', 'labels' keys — used by ComplaintDataset
-    """
-    if isinstance(batch, dict):
-        text_inputs = {k: v.to(device) for k, v in batch["text"].items()}
-        tabular = batch["tabular"].to(device)
-        labels = batch["labels"].to(device)
-        logits = model(text_inputs, tabular)
-    else:
-        inputs, labels = batch[0].to(device), batch[1].to(device)
-        logits = model(inputs)
-    return logits, labels
-
-
 def compute_per_sample_loss(
     model: torch.nn.Module,
     dataset: Dataset,
     batch_size: int = 32,
     device: str = "cpu",
-    forward_fn: callable | None = None,
+    forward_fn: Callable[..., Any] | None = None,
 ) -> list[float]:
     """Compute cross-entropy loss for each sample in the dataset.
 
@@ -136,7 +122,7 @@ def compute_per_sample_loss(
     override the default batch handling.
     """
     if forward_fn is None:
-        forward_fn = _default_forward
+        forward_fn = forward_batch
 
     model = model.to(device)
     model.eval()

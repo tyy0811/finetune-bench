@@ -16,7 +16,6 @@ dependencies = [
     "onnxruntime==1.23.2",
     "matplotlib==3.10.8",
     "requests==2.32.5",
-    "spacy>=3.7.0",
 ]
 
 [project.optional-dependencies]

@@ -138,9 +138,12 @@ def _format_dp_table(dp_data: dict) -> str:
         "|--------|---------------|----------------|----------|",
     ]
     for r in dp_data["results"]:
+        f1_str = f"{r['val_macro_f1']:.4f}"
+        if "val_macro_f1_std" in r:
+            f1_str += f" +/- {r['val_macro_f1_std']:.4f}"
         rows.append(
             f"| {r['config']} | {r['epsilon_target']} | {r['epsilon_actual']} "
-            f"| {r['val_macro_f1']:.4f} +/- {r['val_macro_f1_std']:.4f} |"
+            f"| {f1_str} |"
         )
     return "\n".join(rows)
 

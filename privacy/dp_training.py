@@ -7,6 +7,9 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset
 
+from privacy._batch import batch_size as get_batch_size
+from privacy._batch import forward_batch
+
 
 def make_dp_config(
     epsilon: float,
@@ -79,26 +82,6 @@ def _collect_gradient_norms(model: torch.nn.Module) -> dict[str, float]:
     return norms
 
 
-def _forward_batch(
-    model: torch.nn.Module, batch: tuple | dict, device: str,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Unpack a batch and run the model forward pass.
-
-    Supports two batch formats:
-    - Tuple/list: (inputs, labels) — used by TensorDataset
-    - Dict with 'text', 'tabular', 'labels' keys — used by ComplaintDataset
-    """
-    if isinstance(batch, dict):
-        text_inputs = {k: v.to(device) for k, v in batch["text"].items()}
-        tabular = batch["tabular"].to(device)
-        labels = batch["labels"].to(device)
-        logits = model(text_inputs, tabular)
-    else:
-        inputs, labels = batch[0].to(device), batch[1].to(device)
-        logits = model(inputs)
-    return logits, labels
-
-
 def train_dp(
     model_class: type,
     model_args: tuple,
@@ -150,10 +133,9 @@ def train_dp(
 
         for batch in dp_loader:
             # Poisson sampling can yield empty batches — skip before forward pass
-            batch_size = batch["labels"].shape[0] if isinstance(batch, dict) else batch[0].shape[0]
-            if batch_size == 0:
+            if get_batch_size(batch) == 0:
                 continue
-            logits, labels = _forward_batch(dp_model, batch, device)
+            logits, labels = forward_batch(dp_model, batch, device)
             loss = torch.nn.functional.cross_entropy(logits, labels)
             loss.backward()
 
@@ -176,7 +158,7 @@ def train_dp(
     all_labels = []
     with torch.no_grad():
         for batch in val_loader:
-            logits, labels = _forward_batch(dp_model, batch, device)
+            logits, labels = forward_batch(dp_model, batch, device)
             preds = logits.argmax(dim=1)
             all_preds.extend(preds.cpu().tolist())
             all_labels.extend(labels.cpu().tolist())

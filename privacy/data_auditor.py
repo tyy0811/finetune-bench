@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 # CFPB redaction patterns — verified empirically from complaint narratives.
@@ -107,14 +106,6 @@ def _normalize_column_name(name: str) -> str:
 def inventory_sensitive_columns(columns: list[str]) -> list[str]:
     """Flag column names that could serve as protected attributes."""
     return sorted(col for col in columns if _normalize_column_name(col) in _SENSITIVE_COLUMN_NAMES)
-
-
-@dataclass
-class AuditConfig:
-    """Configuration for the data audit."""
-
-    short_narrative_threshold: int = 20  # tokens
-    max_residual_pii: int | None = None  # gate threshold; None = report only
 
 
 def run_audit(
