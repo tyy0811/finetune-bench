@@ -71,7 +71,9 @@ def _setup_remote():
     data_dir = "/data/complaints.csv"
     local_data = "data/complaints.csv"
     os.makedirs("data", exist_ok=True)
-    if os.path.exists(data_dir) and not os.path.exists(local_data):
+    if os.path.exists(local_data):
+        pass  # already present (container reuse)
+    elif os.path.exists(data_dir):
         os.symlink(data_dir, local_data)
     else:
         subprocess.run(["python", "scripts/download_data.py"], check=True)
@@ -189,7 +191,7 @@ def train_dp_model(config: dict, seed: int) -> dict:
         return _OpacusMultimodalWrapper(inner)
 
     result = train_dp(
-        model_class=lambda: make_model(),
+        model_class=make_model,
         model_args=(),
         train_dataset=flat_train,
         val_dataset=flat_val,
@@ -246,13 +248,17 @@ def run_membership_inference_attack(
     num_classes = len(adapter.class_names)
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    # Rebuild model and load checkpoint
+    # Rebuild model and load checkpoint.
+    # Checkpoints are saved from _OpacusMultimodalWrapper, so keys have
+    # an "inner." prefix. Strip it to load into bare MultimodalClassifier.
     model = MultimodalClassifier(
         num_classes=num_classes,
         tabular_input_dim=tabular_dim,
         text_model_name=train_config.text_model_name,
     )
-    model.load_state_dict(torch.load(f"/data/{checkpoint_path}", map_location="cpu"))
+    state_dict = torch.load(f"/data/{checkpoint_path}", map_location="cpu")
+    stripped = {k.removeprefix("inner."): v for k, v in state_dict.items()}
+    model.load_state_dict(stripped)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Compute per-sample losses on train (members) and test (non-members)
