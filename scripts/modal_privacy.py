@@ -71,7 +71,7 @@ def _setup_remote():
     data_dir = "/data/complaints.csv"
     local_data = "data/complaints.csv"
     os.makedirs("data", exist_ok=True)
-    if os.path.exists(data_dir):
+    if os.path.exists(data_dir) and not os.path.exists(local_data):
         os.symlink(data_dir, local_data)
     else:
         subprocess.run(["python", "scripts/download_data.py"], check=True)
@@ -218,7 +218,7 @@ def train_dp_model(config: dict, seed: int) -> dict:
     return result
 
 
-@app.function(gpu="A10G", timeout=1800, image=image, volumes={"/data": vol})
+@app.function(gpu="T4", timeout=1800, image=image, volumes={"/data": vol})
 def run_membership_inference_attack(
     checkpoint_path: str, epsilon_label: str, config_name: str,
 ) -> dict:
