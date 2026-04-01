@@ -139,7 +139,7 @@ class _OpacusMultimodalWrapper(torch.nn.Module):
         return self.inner(text_inputs, tabular)
 
 
-@app.function(gpu="A10G", timeout=3600, image=image, volumes={"/data": vol})
+@app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
 def train_dp_model(config: dict, seed: int) -> dict:
     """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
     _setup_remote()
@@ -295,10 +295,20 @@ def main(
     dp_train: bool = False,
     mia: bool = False,
     all: bool = False,
+    test: bool = False,
 ):
     """CLI entrypoint for Modal privacy experiments."""
     artifacts = Path(_REPO_ROOT) / "artifacts"
     artifacts.mkdir(exist_ok=True)
+
+    if test:
+        print("Running single validation run (moderate_dp, seed=42, T4)...")
+        result = train_dp_model.remote(
+            {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5, "max_grad_norm": 1.0},
+            42,
+        )
+        print(json.dumps({k: v for k, v in result.items() if k != "model_state_dict"}, indent=2))
+        return
 
     if dp_train or all:
         print(f"Dispatching {len(DP_CONFIGS) * len(SEEDS)} DP training runs...")

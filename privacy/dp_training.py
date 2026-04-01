@@ -138,7 +138,7 @@ def train_dp(
     all_train_labels = []
     for i in range(len(train_dataset)):
         item = train_dataset[i]
-        label = item["labels"] if isinstance(item, dict) else item[1]
+        label = item["labels"] if isinstance(item, dict) else item[-1]
         all_train_labels.append(int(label))
     class_weights = _compute_class_weights(all_train_labels, num_classes).to(device)
 
