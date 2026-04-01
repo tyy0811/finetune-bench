@@ -149,10 +149,11 @@ def train_dp(
         step_count = 0
 
         for batch in dp_loader:
-            logits, labels = _forward_batch(dp_model, batch, device)
-            # Poisson sampling can yield empty batches — skip them
-            if labels.shape[0] == 0:
+            # Poisson sampling can yield empty batches — skip before forward pass
+            batch_size = batch["labels"].shape[0] if isinstance(batch, dict) else batch[0].shape[0]
+            if batch_size == 0:
                 continue
+            logits, labels = _forward_batch(dp_model, batch, device)
             loss = torch.nn.functional.cross_entropy(logits, labels)
             loss.backward()
 
