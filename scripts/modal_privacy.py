@@ -30,6 +30,7 @@ image = (
         "mlflow==3.10.1",
         "pydantic==2.12.5",
         "opacus==1.4.1",
+        "dp-transformers>=1.0.1",
         "requests==2.32.5",
     )
     .add_local_dir(
@@ -137,6 +138,8 @@ def train_dp_model(config: dict, seed: int) -> dict:
 
     import torch
     import torch.nn as nn
+    from dp_transformers.module_modification import convert_model_to_dp
+    from transformers import DistilBertModel
 
     from adapters.cfpb import CFPBAdapter
     from models.fusion_model import MultimodalClassifier
@@ -149,10 +152,7 @@ def train_dp_model(config: dict, seed: int) -> dict:
         def __init__(self, inner):
             super().__init__()
             self.inner = inner
-            # Freeze DistilBERT — Opacus 1.4 cannot compute per-sample
-            # gradients through transformer attention/LayerNorm
-            for p in self.inner.text_encoder.parameters():
-                p.requires_grad = False
+            # No freeze — full model is DP-trainable via dp-transformers
 
         def forward(self, input_ids, attention_mask, tabular):
             text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
@@ -180,6 +180,8 @@ def train_dp_model(config: dict, seed: int) -> dict:
     flat_val = _flatten_complaint_dataset(val_ds)
 
     def make_model():
+        encoder = DistilBertModel.from_pretrained(train_config.text_model_name)
+        encoder = convert_model_to_dp(encoder)
         inner = MultimodalClassifier(
             num_classes=num_classes,
             tabular_input_dim=tabular_dim,
@@ -188,6 +190,7 @@ def train_dp_model(config: dict, seed: int) -> dict:
             fusion_hidden_dim=train_config.fusion_hidden_dim,
             dropout=train_config.dropout,
             text_model_name=train_config.text_model_name,
+            text_encoder=encoder,
         )
         return _OpacusMultimodalWrapper(inner)
 
