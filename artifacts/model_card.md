@@ -83,6 +83,7 @@ This means complaints from underrepresented companies receive lower-quality pred
 
 | Model | epsilon | MIA AUC | Loss Gap | Members | Non-members |
 |-------|---------|---------|----------|---------|-------------|
+| M2_no_dp | inf | 0.53 | 0.13 | 2000 | 2000 |
 | loose_dp | 50.0 | 0.49 | -0.08 | 2000 | 2000 |
 | moderate_dp | 8.0 | 0.49 | -0.07 | 2000 | 2000 |
 | strict_dp | 1.0 | 0.49 | -0.06 | 2000 | 2000 |
@@ -92,12 +93,13 @@ This means complaints from underrepresented companies receive lower-quality pred
 
 | Model | High-freq company AUC | Low-freq company AUC | High-freq N | Low-freq N |
 |-------|----------------------|---------------------|-------------|------------|
+| M2_no_dp | 0.52 | 0.54 | 11528 | 4472 |
 | loose_dp | 0.60 | 0.24 | 11528 | 4472 |
 | moderate_dp | 0.60 | 0.24 | 11528 | 4472 |
 | strict_dp | 0.61 | 0.24 | 11528 | 4472 |
 | strict_dp_tuned_clip | 0.61 | 0.24 | 11528 | 4472 |
 
-**Interpretation:** DP models show MIA AUC of 0.49. No non-DP baseline was provided for comparison.
+**Interpretation:** The non-DP model shows MIA AUC of 0.53, indicating moderate memorization of training data. DP training reduces MIA AUC to 0.49, approaching random guess (0.50).
 
 ## Limitations & Risks
 

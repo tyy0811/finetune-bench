@@ -1,6 +1,22 @@
 {
   "results": [
     {
+      "model": "M2_no_dp",
+      "epsilon": "inf",
+      "mia_auc": 0.5253,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 0.3916,
+      "test_loss_mean": 0.5245,
+      "loss_gap": 0.1328,
+      "stratified": {
+        "high_freq_count": 11528,
+        "low_freq_count": 4472,
+        "high_freq_company_auc": 0.5219,
+        "low_freq_company_auc": 0.5447
+      }
+    },
+    {
       "model": "loose_dp",
       "epsilon": "50.0",
       "mia_auc": 0.4913,
