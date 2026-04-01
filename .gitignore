@@ -27,6 +27,9 @@ venv/
 # Planning docs (local only)
 docs/plans/
 
+# Worktrees
+.worktrees/
+
 # IDE
 .idea/
 .vscode/
