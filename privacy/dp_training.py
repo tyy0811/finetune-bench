@@ -123,8 +123,8 @@ def train_dp(
     model = model_class(*model_args).to(device)
 
     # Only parameters with requires_grad=True are DP-trained.
-    # For transformer models, freeze the encoder before calling train_dp —
-    # Opacus 1.4 cannot compute per-sample gradients through attention/LayerNorm.
+    # For full-model DP, use dp-transformers to convert the encoder
+    # before constructing the model (Approach B).
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad], lr=lr
     )

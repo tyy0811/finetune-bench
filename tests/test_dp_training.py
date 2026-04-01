@@ -1,5 +1,6 @@
 """Tests for privacy.dp_training module."""
 
+import numpy as np
 import pytest
 import torch
 
@@ -254,4 +255,88 @@ class TestTrainDpMultimodal:
         assert result["epsilon_actual"] > 0
         assert "val_macro_f1" in result
         assert "model_state_dict" in result
+        assert result["train_loss"] > 0
+
+
+class TestDpTransformersIntegration:
+    """Test full-model DP training with dp-transformers layer conversion."""
+
+    def test_convert_encoder_and_train(self):
+        """Full-model DP-SGD via dp-transformers produces valid results with budget consumed."""
+        pytest.importorskip("opacus")
+        pytest.importorskip("dp_transformers")
+
+        from dp_transformers.module_modification import convert_model_to_dp
+        from transformers import DistilBertModel, DistilBertTokenizer
+
+        from models.fusion_model import MultimodalClassifier
+        from training.train import ComplaintDataset
+
+        tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+        num_classes = 3
+        tabular_dim = 5
+
+        train_narratives = [f"complaint about issue {i}" for i in range(32)]
+        val_narratives = [f"different complaint {i}" for i in range(8)]
+        train_tabular = np.random.randn(32, tabular_dim).astype(np.float32)
+        val_tabular = np.random.randn(8, tabular_dim).astype(np.float32)
+        train_labels = np.random.randint(0, num_classes, 32)
+        val_labels = np.random.randint(0, num_classes, 8)
+
+        train_ds = ComplaintDataset(
+            train_narratives, train_tabular, train_labels, tokenizer, max_length=32,
+        )
+        val_ds = ComplaintDataset(
+            val_narratives, val_tabular, val_labels, tokenizer, max_length=32,
+        )
+
+        flat_train = torch.utils.data.TensorDataset(
+            train_ds.encodings["input_ids"],
+            train_ds.encodings["attention_mask"],
+            train_ds.tabular_features,
+            train_ds.labels,
+        )
+        flat_val = torch.utils.data.TensorDataset(
+            val_ds.encodings["input_ids"],
+            val_ds.encodings["attention_mask"],
+            val_ds.tabular_features,
+            val_ds.labels,
+        )
+
+        # Approach B: convert encoder first, then inject into model
+        encoder = DistilBertModel.from_pretrained("distilbert-base-uncased")
+        encoder = convert_model_to_dp(encoder)
+
+        class OpacusWrapper(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = MultimodalClassifier(
+                    num_classes=num_classes,
+                    tabular_input_dim=tabular_dim,
+                    text_model_name="distilbert-base-uncased",
+                    text_encoder=encoder,
+                )
+                # No freeze — full model is DP-trainable
+
+            def forward(self, input_ids, attention_mask, tabular):
+                text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+                return self.inner(text_inputs, tabular)
+
+        result = train_dp(
+            model_class=OpacusWrapper,
+            model_args=(),
+            train_dataset=flat_train,
+            val_dataset=flat_val,
+            num_classes=num_classes,
+            epochs=1,
+            batch_size=8,
+            lr=2e-5,
+            epsilon=50.0,
+            delta=1e-5,
+            max_grad_norm=1.0,
+            device="cpu",
+        )
+
+        assert result["epsilon_actual"] > 0
+        assert "val_macro_f1" in result
         assert result["train_loss"] > 0
