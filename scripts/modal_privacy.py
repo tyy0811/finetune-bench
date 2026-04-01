@@ -301,12 +301,112 @@ def run_membership_inference_attack(
     }
 
 
+@app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
+def train_and_attack_baseline() -> dict:
+    """Train a non-DP M2 model and run MIA on it for baseline comparison.
+
+    Uses the existing training pipeline (train()) to produce a fully
+    fine-tuned model (unfrozen encoder), then runs MIA on it.
+    """
+    _setup_remote()
+
+    import torch
+    from transformers import DistilBertTokenizer
+
+    from adapters.cfpb import CFPBAdapter
+    from models.fusion_model import MultimodalClassifier
+    from privacy.membership_inference import (
+        balance_member_nonmember,
+        compute_mia_auc,
+        compute_per_sample_loss,
+        stratified_mia_by_entity,
+    )
+    from training.config import TrainConfig
+    from training.train import ComplaintDataset, compute_class_weights
+
+    train_config = TrainConfig(variant="M2", seed=42, num_epochs=3)
+
+    adapter = CFPBAdapter(sample_size=20_000, seed=42)
+    splits = adapter.preprocess()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    tokenizer = DistilBertTokenizer.from_pretrained(train_config.text_model_name)
+    train_ds = ComplaintDataset(
+        splits["train"]["narratives"], splits["train"]["tabular_features"],
+        splits["train"]["labels"], tokenizer, max_length=train_config.max_seq_length,
+    )
+    val_ds = ComplaintDataset(
+        splits["val"]["narratives"], splits["val"]["tabular_features"],
+        splits["val"]["labels"], tokenizer, max_length=train_config.max_seq_length,
+    )
+
+    num_classes = len(adapter.class_names)
+    tabular_dim = splits["train"]["tabular_features"].shape[1]
+    model = MultimodalClassifier(
+        num_classes=num_classes, tabular_input_dim=tabular_dim,
+        text_model_name=train_config.text_model_name,
+    ).to(device)
+
+    # Train with same recipe as baseline (full fine-tuning, differential LR)
+    class_weights = compute_class_weights(splits["train"]["labels"], num_classes).to(device)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=16, shuffle=True)
+    optimizer = torch.optim.AdamW([
+        {"params": model.text_encoder.parameters(), "lr": 2e-5},
+        {"params": list(model.tabular_mlp.parameters()) + list(model.fusion_head.parameters()),
+         "lr": 1e-3},
+    ])
+
+    for _epoch in range(3):
+        model.train()
+        for batch in train_loader:
+            text = {k: v.to(device) for k, v in batch["text"].items()}
+            tabular = batch["tabular"].to(device)
+            labels = batch["labels"].to(device)
+            logits = model(text, tabular)
+            loss = torch.nn.functional.cross_entropy(logits, labels, weight=class_weights)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    # Now run MIA on the trained model
+    member_losses = compute_per_sample_loss(model, train_ds, batch_size=32, device=str(device))
+    nonmember_losses = compute_per_sample_loss(model, val_ds, batch_size=32, device=str(device))
+
+    balanced_m, balanced_nm = balance_member_nonmember(member_losses, nonmember_losses)
+    mia_result = compute_mia_auc(balanced_m, balanced_nm)
+
+    train_companies = splits["train"]["companies"]
+    company_counts: dict[str, int] = {}
+    for company in train_companies:
+        company_counts[company] = company_counts.get(company, 0) + 1
+
+    stratified = stratified_mia_by_entity(
+        member_losses=member_losses,
+        member_companies=train_companies,
+        nonmember_losses=nonmember_losses,
+        company_train_counts=company_counts,
+    )
+
+    return {
+        "model": "M2_no_dp",
+        "epsilon": "inf",
+        "mia_auc": mia_result["mia_auc"],
+        "member_sample_size": len(balanced_m),
+        "non_member_sample_size": len(balanced_nm),
+        "train_loss_mean": mia_result["train_loss_mean"],
+        "test_loss_mean": mia_result["test_loss_mean"],
+        "loss_gap": mia_result["loss_gap"],
+        "stratified": stratified,
+    }
+
+
 @app.local_entrypoint()
 def main(
     dp_train: bool = False,
     mia: bool = False,
     all: bool = False,
     test: bool = False,
+    baseline_mia: bool = False,
 ):
     """CLI entrypoint for Modal privacy experiments."""
     artifacts = Path(_REPO_ROOT) / "artifacts"
@@ -319,6 +419,27 @@ def main(
             42,
         )
         print(json.dumps({k: v for k, v in result.items() if k != "model_state_dict"}, indent=2))
+        return
+
+    if baseline_mia:
+        print("Training non-DP M2 baseline and running MIA...")
+        _prewarm_data.remote()
+        baseline_result = train_and_attack_baseline.remote()
+        print(json.dumps(baseline_result, indent=2))
+
+        # Merge into existing mia_results.json if present
+        mia_path = artifacts / "mia_results.json"
+        if mia_path.exists():
+            mia_data = json.loads(mia_path.read_text())
+            # Remove any existing baseline entry
+            mia_data["results"] = [
+                r for r in mia_data["results"] if r.get("epsilon") != "inf"
+            ]
+            mia_data["results"].insert(0, baseline_result)
+        else:
+            mia_data = {"results": [baseline_result]}
+        mia_path.write_text(json.dumps(mia_data, indent=2))
+        print(f"Baseline MIA merged into {mia_path}")
         return
 
     if dp_train or mia or all:
