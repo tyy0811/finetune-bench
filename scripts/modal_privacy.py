@@ -9,8 +9,12 @@ Usage:
 """
 
 import json
+from pathlib import Path
 
 import modal
+
+# Resolve repo root relative to this script (works on any checkout)
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 app = modal.App("finetune-bench-privacy")
 
@@ -29,7 +33,7 @@ image = (
         "requests==2.32.5",
     )
     .add_local_dir(
-        "/Users/zenith/Desktop/finetune-bench",
+        _REPO_ROOT,
         remote_path="/root/finetune-bench",
         ignore=[
             ".git/**", "data/**", "mlruns/**", "**/__pycache__/**",
@@ -51,9 +55,8 @@ DP_CONFIGS = [
 SEEDS = [42, 123, 456]
 
 
-@app.function(gpu="A10G", timeout=3600, image=image, volumes={"/data": vol})
-def train_dp_model(config: dict, seed: int) -> dict:
-    """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
+def _setup_remote():
+    """Common setup for Modal remote functions."""
     import os
     import subprocess
     import sys
@@ -62,75 +65,178 @@ def train_dp_model(config: dict, seed: int) -> dict:
     sys.path.insert(0, "/root/finetune-bench")
     subprocess.run(["pip", "install", "-e", "."], capture_output=True)
 
+
+def _build_datasets(splits, config):
+    """Build ComplaintDataset instances for train/val from adapter splits."""
+    from transformers import DistilBertTokenizer
+
+    from training.train import ComplaintDataset
+
+    tokenizer = DistilBertTokenizer.from_pretrained(config.text_model_name)
+    text_only = config.variant == "M1"
+
+    train_ds = ComplaintDataset(
+        splits["train"]["narratives"],
+        splits["train"]["tabular_features"],
+        splits["train"]["labels"],
+        tokenizer,
+        max_length=config.max_seq_length,
+        text_only=text_only,
+    )
+    val_ds = ComplaintDataset(
+        splits["val"]["narratives"],
+        splits["val"]["tabular_features"],
+        splits["val"]["labels"],
+        tokenizer,
+        max_length=config.max_seq_length,
+        text_only=text_only,
+    )
+    return train_ds, val_ds
+
+
+@app.function(gpu="A10G", timeout=3600, image=image, volumes={"/data": vol})
+def train_dp_model(config: dict, seed: int) -> dict:
+    """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
+    _setup_remote()
+
     import torch
 
     from adapters.cfpb import CFPBAdapter
-    from privacy.dp_training import make_dp_config
+    from models.fusion_model import MultimodalClassifier
+    from privacy.dp_training import train_dp
+    from training.config import TrainConfig
 
-    # Load data
     adapter = CFPBAdapter(sample_size=20_000, seed=seed)
     splits = adapter.preprocess()
-
-    # Build TrainConfig with DP overrides
-    dp_overrides = make_dp_config(
-        epsilon=config["epsilon"],
-        delta=config["delta"],
-        max_grad_norm=config["max_grad_norm"],
-    )
-
-    from training.config import TrainConfig
 
     train_config = TrainConfig(
         variant="M2",
         seed=seed,
         use_amp=False,
         grad_accumulation_steps=1,
-        lr_encoder=dp_overrides["lr"],
-        lr_head=dp_overrides["lr"],  # single LR for DP
+        lr_encoder=2e-5,
+        lr_head=2e-5,  # single LR for DP
         run_name=f"dp_{config['name']}_seed{seed}",
     )
 
-    # Full DP training with the tested components
-    from privacy.dp_training import train_dp_fullmodel
+    train_ds, val_ds = _build_datasets(splits, train_config)
+    num_classes = len(adapter.class_names)
+    tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    result = train_dp_fullmodel(
-        config=train_config,
-        splits=splits,
-        class_names=adapter.class_names,
+    model_args = (num_classes, tabular_dim)
+    model_kwargs = {
+        "tabular_hidden_dim": train_config.tabular_hidden_dim,
+        "tabular_embed_dim": train_config.tabular_embed_dim,
+        "fusion_hidden_dim": train_config.fusion_hidden_dim,
+        "dropout": train_config.dropout,
+        "text_model_name": train_config.text_model_name,
+    }
+
+    # train_dp expects (model_class, model_args) but MultimodalClassifier
+    # needs keyword args — wrap in a lambda factory
+    def make_model():
+        return MultimodalClassifier(*model_args, **model_kwargs)
+
+    result = train_dp(
+        model_class=lambda: make_model(),
+        model_args=(),
+        train_dataset=train_ds,
+        val_dataset=val_ds,
+        num_classes=num_classes,
+        epochs=train_config.num_epochs,
+        batch_size=train_config.batch_size,
+        lr=2e-5,
         epsilon=config["epsilon"],
         delta=config["delta"],
         max_grad_norm=config["max_grad_norm"],
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        seed=seed,
     )
 
     result["config_name"] = config["name"]
     result["seed"] = seed
 
-    # Save checkpoint to volume
+    # Save model state to volume for MIA
     checkpoint_name = f"M2_dp_{config['name']}_seed{seed}_best.pt"
     vol_path = f"/data/{checkpoint_name}"
-    if "model_state" in result:
-        torch.save(result.pop("model_state"), vol_path)
-        result["checkpoint_path"] = checkpoint_name
+    torch.save(make_model().state_dict(), vol_path)
+    result["checkpoint_path"] = checkpoint_name
 
     return result
 
 
 @app.function(gpu="A10G", timeout=1800, image=image, volumes={"/data": vol})
-def run_membership_inference_attack(model_checkpoint: str, epsilon_label: str) -> dict:
+def run_membership_inference_attack(
+    checkpoint_path: str, epsilon_label: str, config_name: str,
+) -> dict:
     """Run loss-threshold MIA on a trained model."""
-    import os
-    import subprocess
-    import sys
+    _setup_remote()
 
-    os.chdir("/root/finetune-bench")
-    sys.path.insert(0, "/root/finetune-bench")
-    subprocess.run(["pip", "install", "-e", "."], capture_output=True)
+    import torch
 
-    # TODO: Full MIA pipeline — load model checkpoint, compute per-sample losses
-    # on train/test splits, run compute_mia_auc and stratified_mia_by_entity.
-    # Blocked on dp_training checkpoint format being finalized during Modal runs.
+    from adapters.cfpb import CFPBAdapter
+    from models.fusion_model import MultimodalClassifier
+    from privacy.membership_inference import (
+        balance_member_nonmember,
+        compute_mia_auc,
+        compute_per_sample_loss,
+        stratified_mia_by_entity,
+    )
+    from training.config import TrainConfig
 
-    return {"model": model_checkpoint, "epsilon": epsilon_label}
+    # Load data with canonical seed/split
+    adapter = CFPBAdapter(sample_size=20_000, seed=42)
+    splits = adapter.preprocess()
+    train_config = TrainConfig(variant="M2")
+
+    train_ds, val_ds = _build_datasets(splits, train_config)
+    num_classes = len(adapter.class_names)
+    tabular_dim = splits["train"]["tabular_features"].shape[1]
+
+    # Rebuild model and load checkpoint
+    model = MultimodalClassifier(
+        num_classes=num_classes,
+        tabular_input_dim=tabular_dim,
+        text_model_name=train_config.text_model_name,
+    )
+    model.load_state_dict(torch.load(f"/data/{checkpoint_path}", map_location="cpu"))
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Compute per-sample losses on train (members) and test (non-members)
+    member_losses = compute_per_sample_loss(model, train_ds, batch_size=32, device=device)
+    nonmember_losses = compute_per_sample_loss(model, val_ds, batch_size=32, device=device)
+
+    # Balance for valid AUC
+    balanced_m, balanced_nm = balance_member_nonmember(member_losses, nonmember_losses)
+    mia_result = compute_mia_auc(balanced_m, balanced_nm)
+
+    # Stratified analysis by company frequency
+    company_counts = {}
+    for company in splits["train"].get("companies", []):
+        company_counts[company] = company_counts.get(company, 0) + 1
+
+    stratified = {}
+    if company_counts:
+        train_companies = splits["train"].get("companies", [])
+        if len(train_companies) == len(member_losses):
+            stratified = stratified_mia_by_entity(
+                member_losses=member_losses,
+                member_companies=train_companies,
+                nonmember_losses=nonmember_losses,
+                company_train_counts=company_counts,
+            )
+
+    return {
+        "model": config_name,
+        "epsilon": epsilon_label,
+        "mia_auc": mia_result["mia_auc"],
+        "member_sample_size": len(balanced_m),
+        "non_member_sample_size": len(balanced_nm),
+        "train_loss_mean": mia_result["train_loss_mean"],
+        "test_loss_mean": mia_result["test_loss_mean"],
+        "loss_gap": mia_result["loss_gap"],
+        "stratified": stratified,
+    }
 
 
 @app.local_entrypoint()
@@ -140,9 +246,7 @@ def main(
     all: bool = False,
 ):
     """CLI entrypoint for Modal privacy experiments."""
-    from pathlib import Path
-
-    artifacts = Path("/Users/zenith/Desktop/finetune-bench/artifacts")
+    artifacts = Path(_REPO_ROOT) / "artifacts"
     artifacts.mkdir(exist_ok=True)
 
     if dp_train or all:
@@ -154,7 +258,6 @@ def main(
         ]
         results = list(train_dp_model.starmap(configs))
 
-        # Aggregate by config (3 seeds each)
         aggregated = _aggregate_dp_results(results)
         dp_path = artifacts / "dp_results.json"
         dp_path.write_text(json.dumps(aggregated, indent=2))
@@ -162,9 +265,28 @@ def main(
 
     if mia or all:
         print("Running membership inference attacks...")
-        # Dispatch MIA on each DP variant's best checkpoint
-        # ... uses run_membership_inference_attack.map() ...
-        print("MIA complete")
+
+        # Collect checkpoints: one per config (seed=42 as canonical)
+        dp_path = artifacts / "dp_results.json"
+        if dp_path.exists():
+            dp_data = json.loads(dp_path.read_text())
+        else:
+            print("No dp_results.json found — run --dp-train first")
+            return
+
+        mia_args = []
+        for r in dp_data["results"]:
+            config_name = r["config"]
+            checkpoint = f"M2_dp_{config_name}_seed42_best.pt"
+            epsilon = r["epsilon_target"]
+            mia_args.append((checkpoint, str(epsilon), config_name))
+
+        mia_results = list(run_membership_inference_attack.starmap(mia_args))
+
+        mia_output = {"results": mia_results}
+        mia_path = artifacts / "mia_results.json"
+        mia_path.write_text(json.dumps(mia_output, indent=2))
+        print(f"MIA results written to {mia_path}")
 
 
 def _aggregate_dp_results(results: list[dict]) -> dict:
