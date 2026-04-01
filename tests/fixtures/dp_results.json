@@ -1,0 +1,28 @@
+{
+  "results": [
+    {
+      "config": "no_dp",
+      "epsilon_target": "inf",
+      "epsilon_actual": "inf",
+      "val_macro_f1": 0.6555,
+      "val_macro_f1_std": 0.0076,
+      "seeds": [42, 123, 456]
+    },
+    {
+      "config": "moderate_dp",
+      "epsilon_target": 8.0,
+      "epsilon_actual": 7.93,
+      "val_macro_f1": 0.5821,
+      "val_macro_f1_std": 0.0124,
+      "seeds": [42, 123, 456]
+    },
+    {
+      "config": "strict_dp",
+      "epsilon_target": 1.0,
+      "epsilon_actual": 0.98,
+      "val_macro_f1": 0.3912,
+      "val_macro_f1_std": 0.0201,
+      "seeds": [42, 123, 456]
+    }
+  ]
+}

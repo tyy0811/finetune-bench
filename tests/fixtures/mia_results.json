@@ -1,0 +1,40 @@
+{
+  "results": [
+    {
+      "model": "M2_no_dp",
+      "epsilon": "inf",
+      "mia_auc": 0.73,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 0.42,
+      "test_loss_mean": 0.68,
+      "loss_gap": 0.26,
+      "deduplication_applied": false,
+      "duplicate_overlap_count": 3,
+      "stratified": {
+        "high_freq_company_auc": 0.78,
+        "low_freq_company_auc": 0.65,
+        "high_freq_count": 1200,
+        "low_freq_count": 800
+      }
+    },
+    {
+      "model": "M2_dp_eps1.0",
+      "epsilon": 1.0,
+      "mia_auc": 0.53,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 1.21,
+      "test_loss_mean": 1.28,
+      "loss_gap": 0.07,
+      "deduplication_applied": false,
+      "duplicate_overlap_count": 3,
+      "stratified": {
+        "high_freq_company_auc": 0.55,
+        "low_freq_company_auc": 0.52,
+        "high_freq_count": 1200,
+        "low_freq_count": 800
+      }
+    }
+  ]
+}
