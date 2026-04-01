@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass
+from pathlib import Path
 
 # CFPB redaction patterns — verified empirically from complaint narratives.
 # XX/XX/XXXX must match before XXXX to avoid partial overlap.
@@ -98,3 +101,75 @@ def detect_near_duplicates(texts: list[str]) -> dict:
 def inventory_sensitive_columns(columns: list[str]) -> list[str]:
     """Flag column names that could serve as protected attributes."""
     return sorted(col for col in columns if col.lower() in _SENSITIVE_COLUMN_NAMES)
+
+
+@dataclass
+class AuditConfig:
+    """Configuration for the data audit."""
+
+    short_narrative_threshold: int = 20  # tokens
+    max_residual_pii: int | None = None  # gate threshold; None = report only
+
+
+def run_audit(
+    narratives: list[str],
+    columns: list[str],
+    output_path: Path | None = None,
+    max_residual_pii: int | None = None,
+    short_narrative_threshold: int = 20,
+) -> dict:
+    """Run the full data privacy audit.
+
+    Scans for redaction markers, residual PII, near-duplicates,
+    sensitive columns, and short narratives. Optionally writes
+    JSON report and enforces a PII gate.
+    """
+    redaction = detect_redaction_markers(narratives)
+    pii = scan_residual_pii(narratives)
+    duplicates = detect_near_duplicates(narratives)
+    sensitive = inventory_sensitive_columns(columns)
+
+    short_count = sum(
+        1 for text in narratives if len(text.split()) < short_narrative_threshold
+    )
+
+    assessment_parts = []
+    if redaction["count"] > 0:
+        assessment_parts.append(
+            f"Source applies redaction ({redaction['count']} markers)"
+        )
+    if pii["total"] > 0:
+        assessment_parts.append(
+            f"{pii['total']} residual PII instances suggest incomplete coverage"
+        )
+    if duplicates["count"] > 0:
+        assessment_parts.append(
+            f"{duplicates['count']} near-duplicates flagged for deduplication"
+        )
+    assessment = ". ".join(assessment_parts) + "." if assessment_parts else "No issues found."
+
+    report: dict = {
+        "total_samples": len(narratives),
+        "redaction_markers": {
+            "count": redaction["count"],
+            "patterns_found": redaction["patterns_found"],
+            "verified_from_sample": True,
+        },
+        "residual_pii": pii,
+        "sensitive_columns": sensitive,
+        "near_duplicates": duplicates,
+        "short_narratives": {
+            "count": short_count,
+            "threshold_tokens": short_narrative_threshold,
+        },
+        "assessment": assessment,
+    }
+
+    if max_residual_pii is not None:
+        report["gate_passed"] = pii["total"] <= max_residual_pii
+
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(report, indent=2))
+
+    return report

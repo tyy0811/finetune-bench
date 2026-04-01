@@ -1,9 +1,14 @@
 """Tests for privacy.data_auditor module."""
 
+import json
+import tempfile
+from pathlib import Path
+
 from privacy.data_auditor import (
     detect_near_duplicates,
     detect_redaction_markers,
     inventory_sensitive_columns,
+    run_audit,
     scan_residual_pii,
 )
 
@@ -115,3 +120,68 @@ class TestSensitiveColumnInventory:
     def test_empty_columns(self):
         result = inventory_sensitive_columns([])
         assert result == []
+
+
+class TestFullAudit:
+    def _sample_data(self):
+        """Synthetic CFPB-like data with known PII and redaction markers."""
+        return {
+            "narratives": [
+                "XXXX bank charged me on XX/XX/XXXX without notice",
+                "I called XXXX about my mortgage and they said contact john@test.com",
+                "My credit card from XXXX has wrong charges",
+                "I called XXXX about my mortgage and they said contact john@test.com",
+                "Normal complaint with no special content",
+            ],
+            "columns": ["narrative", "company", "state", "submitted_via", "product"],
+        }
+
+    def test_audit_produces_complete_report(self):
+        data = self._sample_data()
+        report = run_audit(data["narratives"], data["columns"])
+        assert "redaction_markers" in report
+        assert "residual_pii" in report
+        assert "sensitive_columns" in report
+        assert "near_duplicates" in report
+        assert "short_narratives" in report
+        assert "total_samples" in report
+        assert "assessment" in report
+
+    def test_audit_counts_are_correct(self):
+        data = self._sample_data()
+        report = run_audit(data["narratives"], data["columns"])
+        assert report["total_samples"] == 5
+        assert report["redaction_markers"]["count"] > 0
+        assert report["residual_pii"]["total"] >= 1  # john@test.com
+        assert report["near_duplicates"]["count"] >= 1  # duplicate narrative
+
+    def test_short_narratives_flagged(self):
+        narratives = ["short", "This is a sufficiently long complaint narrative about fees"]
+        report = run_audit(narratives, [])
+        assert report["short_narratives"]["count"] >= 1
+
+    def test_audit_writes_json(self):
+        data = self._sample_data()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outpath = Path(tmpdir) / "audit.json"
+            run_audit(data["narratives"], data["columns"], output_path=outpath)
+            assert outpath.exists()
+            loaded = json.loads(outpath.read_text())
+            assert loaded["total_samples"] == 5
+
+
+class TestPreTrainingGate:
+    def test_gate_passes_when_under_threshold(self):
+        narratives = ["Normal complaint about a billing issue"]
+        report = run_audit(narratives, [], max_residual_pii=10)
+        assert report["gate_passed"] is True
+
+    def test_gate_fails_when_over_threshold(self):
+        narratives = ["Contact john@a.com or jane@b.com or bob@c.com"]
+        report = run_audit(narratives, [], max_residual_pii=1)
+        assert report["gate_passed"] is False
+
+    def test_gate_not_evaluated_when_no_threshold(self):
+        narratives = ["Contact john@a.com"]
+        report = run_audit(narratives, [])
+        assert "gate_passed" not in report
