@@ -30,7 +30,7 @@ image = (
         "mlflow==3.10.1",
         "pydantic==2.12.5",
         "opacus==1.4.1",
-        "dp-transformers>=1.0.1",
+        "dp-transformers==1.0.1",
         "requests==2.32.5",
     )
     .add_local_dir(
@@ -233,6 +233,9 @@ def run_membership_inference_attack(
 
     import torch
 
+    from dp_transformers.module_modification import convert_model_to_dp
+    from transformers import DistilBertModel
+
     from adapters.cfpb import CFPBAdapter
     from models.fusion_model import MultimodalClassifier
     from privacy.membership_inference import (
@@ -252,13 +255,17 @@ def run_membership_inference_attack(
     num_classes = len(adapter.class_names)
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    # Rebuild model and load checkpoint.
+    # Rebuild model with dp-transformers-converted encoder to match
+    # the checkpoint's state_dict keys (LayerNorm -> GroupNorm etc.).
     # Checkpoints are saved from _OpacusMultimodalWrapper, so keys have
     # an "inner." prefix. Strip it to load into bare MultimodalClassifier.
+    encoder = DistilBertModel.from_pretrained(train_config.text_model_name)
+    encoder = convert_model_to_dp(encoder)
     model = MultimodalClassifier(
         num_classes=num_classes,
         tabular_input_dim=tabular_dim,
         text_model_name=train_config.text_model_name,
+        text_encoder=encoder,
     )
     state_dict = torch.load(f"/data/{checkpoint_path}", map_location="cpu")
     stripped = {k.removeprefix("inner."): v for k, v in state_dict.items()}
