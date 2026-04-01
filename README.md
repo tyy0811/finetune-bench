@@ -4,7 +4,7 @@
 
 Multimodal classification benchmark where the headline fusion gain turned out to be entity memorization — and the ablation proved it.
 
-`45 tests` | `5 ablation variants` | `8 corruption conditions` | `fp16 mixed-precision` | `Docker` | `ONNX export` | `CI green`
+`58 tests` | `5 ablation variants` | `8 corruption conditions` | `fp16 mixed-precision` | `DP-SGD privacy` | `MIA evaluation` | `model card` | `Docker` | `ONNX export` | `CI green`
 
 See [agent-bench](https://github.com/tyy0811/agent-bench) for agentic RAG and retrieval evaluation evidence.
 
@@ -226,6 +226,75 @@ Runs 4 configs (M2/M3 x fp32/fp16) x 3 seeds = 12 runs. Results saved to `result
 | M3      | fp16      | 0.6598   | 1797          | 34.4            | 1.9x    |
 
 *NVIDIA A10 (24 GB VRAM), 3 seeds each. DistilBERT (66M params) shows ~2x epoch speedup from fp16 Tensor Core acceleration, with only 8% peak memory reduction — the model is too small for dramatic memory savings. F1 is preserved within noise. See [DECISIONS.md](DECISIONS.md) for design rationale.*
+
+## Privacy & Model Governance
+
+DP-SGD training, membership inference evaluation, data privacy audit, and model card generation — demonstrating responsible AI practices in the fine-tuning lifecycle.
+
+### Privacy-Utility Tradeoff
+
+![Privacy-utility tradeoff](artifacts/privacy_utility_tradeoff.png)
+
+| Config | Target ε | Actual ε | Macro-F1 |
+|--------|----------|----------|----------|
+| M2 baseline (no DP) | ∞ | — | 0.6555 +/- 0.0076 |
+| Loose DP | 50.0 | 49.99 | 0.0801 |
+| Moderate DP | 8.0 | 8.00 | 0.0801 |
+| Strict DP | 1.0 | 0.99 | 0.0801 |
+
+*DP-SGD with frozen DistilBERT encoder (Opacus 1.4 limitation — see [DECISIONS.md](DECISIONS.md) #13). Only the tabular MLP + fusion head (66K params) are trained with differential privacy. The frozen encoder prevents the model from adapting text representations, collapsing utility. This is an honest limitation of applying DP to transformer architectures with current tooling.*
+
+### Membership Inference Attack
+
+![MIA results](artifacts/mia_auc_chart.png)
+
+| Model | ε | MIA AUC | Loss Gap | Interpretation |
+|-------|---|---------|----------|----------------|
+| M2 (no DP) | ∞ | 0.5253 | +0.13 | Slight memorization |
+| Loose DP | 50.0 | 0.4913 | -0.08 | Random guess |
+| Moderate DP | 8.0 | 0.4914 | -0.07 | Random guess |
+| Strict DP | 1.0 | 0.4918 | -0.06 | Random guess |
+
+*Loss-threshold attack on 2000 balanced member/non-member samples. The non-DP model shows AUC slightly above random guess (0.53), consistent with limited memorization on this dataset. DP models show AUC ~0.49, confirming DP-SGD eliminates the memorization signal.*
+
+### Data Privacy Audit
+
+Pre-training audit of the CFPB training corpus (16,000 samples):
+
+- **Redaction markers:** 223,294 (CFPB source-level redaction working)
+- **Residual PII:** 7 instances (5 emails, 2 phones) — imperfect source redaction
+- **NER entities:** 114,758 (59,799 ORG, 36,527 PERSON, 18,365 GPE)
+- **Near-duplicates:** 34,754 pairs (exact normalized)
+- **PII gate:** Enforced (`max_residual_pii=0`), exits non-zero when PII detected
+
+### Model Card
+
+Auto-generated from training artifacts following [Mitchell et al. 2019](https://arxiv.org/abs/1810.03993): [artifacts/model_card.md](artifacts/model_card.md)
+
+Covers: Model Details, Intended Use, Training Data, Evaluation Results, Fairness Analysis, Privacy, Limitations & Risks, Deployment Recommendations.
+
+<details>
+<summary>Run the privacy pipeline</summary>
+
+```bash
+# Data audit (local, ~2 min with NER)
+python -m privacy.data_auditor
+
+# DP training on Modal (12 runs, ~20 min)
+modal run scripts/modal_privacy.py --dp-train
+
+# Membership inference on Modal (4 runs, ~8 min)
+modal run scripts/modal_privacy.py --mia
+
+# Non-DP baseline MIA (1 run, ~15 min)
+modal run scripts/modal_privacy.py --baseline-mia
+
+# Generate charts + model card
+python scripts/generate_privacy_charts.py
+python scripts/generate_model_card.py
+```
+
+</details>
 
 ## Limitations & Ethics
 

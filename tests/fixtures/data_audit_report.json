@@ -1,0 +1,18 @@
+{
+  "total_samples": 16000,
+  "redaction_markers": {
+    "count": 3200,
+    "patterns_found": ["XXXX", "XX/XX/XXXX"],
+    "verified_from_sample": true
+  },
+  "residual_pii": {
+    "emails": 2,
+    "phones": 0,
+    "ssns": 0,
+    "total": 2
+  },
+  "sensitive_columns": ["company", "state", "submitted_via"],
+  "near_duplicates": {"count": 42, "method": "exact_normalized"},
+  "short_narratives": {"count": 15, "threshold_tokens": 20},
+  "assessment": "Source applies redaction (3200 markers). 2 residual PII instances suggest incomplete coverage. 42 near-duplicates flagged for deduplication."
+}

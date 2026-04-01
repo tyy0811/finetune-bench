@@ -1,0 +1,52 @@
+{
+  "results": [
+    {
+      "config": "loose_dp",
+      "epsilon_target": 50.0,
+      "epsilon_actual": 49.9939,
+      "val_macro_f1": 0.0801,
+      "val_macro_f1_std": 0.0,
+      "seeds": [
+        42,
+        123,
+        456
+      ]
+    },
+    {
+      "config": "moderate_dp",
+      "epsilon_target": 8.0,
+      "epsilon_actual": 7.9973,
+      "val_macro_f1": 0.0801,
+      "val_macro_f1_std": 0.0,
+      "seeds": [
+        42,
+        123,
+        456
+      ]
+    },
+    {
+      "config": "strict_dp",
+      "epsilon_target": 1.0,
+      "epsilon_actual": 0.9917,
+      "val_macro_f1": 0.0801,
+      "val_macro_f1_std": 0.0,
+      "seeds": [
+        42,
+        123,
+        456
+      ]
+    },
+    {
+      "config": "strict_dp_tuned_clip",
+      "epsilon_target": 1.0,
+      "epsilon_actual": 0.9917,
+      "val_macro_f1": 0.0801,
+      "val_macro_f1_std": 0.0,
+      "seeds": [
+        42,
+        123,
+        456
+      ]
+    }
+  ]
+}

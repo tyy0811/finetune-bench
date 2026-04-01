@@ -1,0 +1,27 @@
+{
+  "results": [
+    {
+      "variant": "M1 (text-only)",
+      "val_macro_f1": 0.6236,
+      "val_macro_f1_std": 0.0047,
+      "notes": "DistilBERT baseline"
+    },
+    {
+      "variant": "M2 (fusion)",
+      "val_macro_f1": 0.6555,
+      "val_macro_f1_std": 0.0076,
+      "notes": "+3.2pp from fusion"
+    },
+    {
+      "variant": "M3 (fusion+dropout)",
+      "val_macro_f1": 0.6605,
+      "val_macro_f1_std": 0.0053,
+      "notes": "+0.5pp from modality dropout"
+    },
+    {
+      "variant": "M2b (no company)",
+      "val_macro_f1": 0.6189,
+      "notes": "Fusion gain disappears without company features"
+    }
+  ]
+}
