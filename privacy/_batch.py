@@ -19,9 +19,15 @@ def forward_batch(
         tabular = batch["tabular"].to(device)
         labels = batch["labels"].to(device)
         logits = model(text_inputs, tabular)
-    else:
+    elif len(batch) == 2:
+        # Simple (inputs, labels) from TensorDataset
         inputs, labels = batch[0].to(device), batch[1].to(device)
         logits = model(inputs)
+    else:
+        # Multi-tensor tuple: all but last are model inputs, last is labels
+        model_inputs = [t.to(device) for t in batch[:-1]]
+        labels = batch[-1].to(device)
+        logits = model(*model_inputs)
     return logits, labels
 
 

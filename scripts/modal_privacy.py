@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import modal
+import torch
 
 # Resolve repo root relative to this script (works on any checkout)
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -106,6 +107,38 @@ def _build_datasets(splits, config):
     return train_ds, val_ds
 
 
+def _flatten_complaint_dataset(dataset):
+    """Convert a ComplaintDataset (dict batches) to a flat TensorDataset.
+
+    Opacus requires forward(tensor) signatures. This pre-extracts
+    input_ids, attention_mask, tabular, and labels into flat tensors.
+    """
+    import torch
+
+    input_ids = dataset.encodings["input_ids"]
+    attention_mask = dataset.encodings["attention_mask"]
+    tabular = dataset.tabular_features
+    labels = dataset.labels
+    return torch.utils.data.TensorDataset(input_ids, attention_mask, tabular, labels)
+
+
+class _OpacusMultimodalWrapper(torch.nn.Module):
+    """Wrapper that gives MultimodalClassifier a flat-tensor forward signature.
+
+    Opacus needs forward(input_ids, attention_mask, tabular) → logits.
+    This wrapper unpacks flat tensors into the dict format the inner
+    model expects.
+    """
+
+    def __init__(self, inner):
+        super().__init__()
+        self.inner = inner
+
+    def forward(self, input_ids, attention_mask, tabular):
+        text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+        return self.inner(text_inputs, tabular)
+
+
 @app.function(gpu="A10G", timeout=3600, image=image, volumes={"/data": vol})
 def train_dp_model(config: dict, seed: int) -> dict:
     """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
@@ -135,25 +168,27 @@ def train_dp_model(config: dict, seed: int) -> dict:
     num_classes = len(adapter.class_names)
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    model_args = (num_classes, tabular_dim)
-    model_kwargs = {
-        "tabular_hidden_dim": train_config.tabular_hidden_dim,
-        "tabular_embed_dim": train_config.tabular_embed_dim,
-        "fusion_hidden_dim": train_config.fusion_hidden_dim,
-        "dropout": train_config.dropout,
-        "text_model_name": train_config.text_model_name,
-    }
+    # Flatten datasets for Opacus compatibility (needs tensor inputs, not dicts)
+    flat_train = _flatten_complaint_dataset(train_ds)
+    flat_val = _flatten_complaint_dataset(val_ds)
 
-    # train_dp expects (model_class, model_args) but MultimodalClassifier
-    # needs keyword args — wrap in a lambda factory
     def make_model():
-        return MultimodalClassifier(*model_args, **model_kwargs)
+        inner = MultimodalClassifier(
+            num_classes=num_classes,
+            tabular_input_dim=tabular_dim,
+            tabular_hidden_dim=train_config.tabular_hidden_dim,
+            tabular_embed_dim=train_config.tabular_embed_dim,
+            fusion_hidden_dim=train_config.fusion_hidden_dim,
+            dropout=train_config.dropout,
+            text_model_name=train_config.text_model_name,
+        )
+        return _OpacusMultimodalWrapper(inner)
 
     result = train_dp(
         model_class=lambda: make_model(),
         model_args=(),
-        train_dataset=train_ds,
-        val_dataset=val_ds,
+        train_dataset=flat_train,
+        val_dataset=flat_val,
         num_classes=num_classes,
         epochs=train_config.num_epochs,
         batch_size=train_config.batch_size,
