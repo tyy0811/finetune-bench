@@ -49,7 +49,7 @@ class TestDpTrainingComponents:
         opacus = pytest.importorskip("opacus")
         model, optimizer, loader = _small_components
 
-        dp_model, dp_optimizer, dp_loader = create_dp_training_components(
+        dp_model, dp_optimizer, dp_loader, _engine = create_dp_training_components(
             model=model,
             optimizer=optimizer,
             data_loader=loader,
@@ -65,7 +65,7 @@ class TestDpTrainingComponents:
         pytest.importorskip("opacus")
         model, optimizer, loader = _small_components
 
-        dp_model, dp_optimizer, dp_loader = create_dp_training_components(
+        dp_model, dp_optimizer, dp_loader, _engine = create_dp_training_components(
             model=model,
             optimizer=optimizer,
             data_loader=loader,
@@ -86,7 +86,7 @@ class TestDpTrainingComponents:
         pytest.importorskip("opacus")
         model, optimizer, loader = _small_components
 
-        dp_model, dp_optimizer, dp_loader = create_dp_training_components(
+        dp_model, dp_optimizer, dp_loader, engine = create_dp_training_components(
             model=model,
             optimizer=optimizer,
             data_loader=loader,
@@ -97,13 +97,15 @@ class TestDpTrainingComponents:
         )
         # Train one full epoch
         for batch_x, batch_y in dp_loader:
+            if batch_x.shape[0] == 0:
+                continue
             logits = dp_model(batch_x)
             loss = torch.nn.functional.cross_entropy(logits, batch_y)
             loss.backward()
             dp_optimizer.step()
             dp_optimizer.zero_grad()
 
-        eps = dp_optimizer.privacy_engine.get_epsilon(1e-5)
+        eps = engine.get_epsilon(1e-5)
         assert eps > 0  # some budget consumed
 
 

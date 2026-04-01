@@ -37,10 +37,10 @@ def create_dp_training_components(
     epsilon: float,
     delta: float,
     max_grad_norm: float,
-) -> tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader]:
+) -> tuple[torch.nn.Module, torch.optim.Optimizer, DataLoader, object]:
     """Wrap model, optimizer, and dataloader with Opacus DP-SGD.
 
-    Returns the wrapped (model, optimizer, dataloader) tuple.
+    Returns (model, optimizer, dataloader, privacy_engine).
     Opacus replaces the model with a GradSampleModule (per-sample gradients),
     wraps the optimizer to clip + add noise, and wraps the DataLoader
     for Poisson sampling (required for privacy accounting).
@@ -57,7 +57,7 @@ def create_dp_training_components(
         target_delta=delta,
         max_grad_norm=max_grad_norm,
     )
-    return dp_model, dp_optimizer, dp_loader
+    return dp_model, dp_optimizer, dp_loader, privacy_engine
 
 
 def _collect_gradient_norms(model: torch.nn.Module) -> dict[str, float]:
@@ -109,7 +109,7 @@ def train_dp(
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-    dp_model, dp_optimizer, dp_loader = create_dp_training_components(
+    dp_model, dp_optimizer, dp_loader, privacy_engine = create_dp_training_components(
         model=model,
         optimizer=optimizer,
         data_loader=train_loader,
@@ -130,6 +130,9 @@ def train_dp(
 
         for batch in dp_loader:
             inputs, labels = batch[0].to(device), batch[1].to(device)
+            # Poisson sampling can yield empty batches — skip them
+            if inputs.shape[0] == 0:
+                continue
             logits = dp_model(inputs)
             loss = torch.nn.functional.cross_entropy(logits, labels)
             loss.backward()
@@ -162,7 +165,7 @@ def train_dp(
     class_names = [str(i) for i in range(num_classes)]
     metrics = compute_metrics(all_labels, all_preds, class_names)
 
-    eps_actual = dp_optimizer.privacy_engine.get_epsilon(delta)
+    eps_actual = privacy_engine.get_epsilon(delta)
 
     return {
         "epsilon_target": epsilon,
