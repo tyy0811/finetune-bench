@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "model": "loose_dp",
+      "epsilon": "50.0",
+      "mia_auc": 0.4913,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 1.415,
+      "test_loss_mean": 1.3363,
+      "loss_gap": -0.0786,
+      "stratified": {
+        "high_freq_count": 11528,
+        "low_freq_count": 4472,
+        "high_freq_company_auc": 0.6044,
+        "low_freq_company_auc": 0.2417
+      }
+    },
+    {
+      "model": "moderate_dp",
+      "epsilon": "8.0",
+      "mia_auc": 0.4914,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 1.3788,
+      "test_loss_mean": 1.3078,
+      "loss_gap": -0.071,
+      "stratified": {
+        "high_freq_count": 11528,
+        "low_freq_count": 4472,
+        "high_freq_company_auc": 0.6049,
+        "low_freq_company_auc": 0.2399
+      }
+    },
+    {
+      "model": "strict_dp",
+      "epsilon": "1.0",
+      "mia_auc": 0.4918,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 1.3327,
+      "test_loss_mean": 1.2764,
+      "loss_gap": -0.0563,
+      "stratified": {
+        "high_freq_count": 11528,
+        "low_freq_count": 4472,
+        "high_freq_company_auc": 0.606,
+        "low_freq_company_auc": 0.2365
+      }
+    },
+    {
+      "model": "strict_dp_tuned_clip",
+      "epsilon": "1.0",
+      "mia_auc": 0.4921,
+      "member_sample_size": 2000,
+      "non_member_sample_size": 2000,
+      "train_loss_mean": 1.3752,
+      "test_loss_mean": 1.3081,
+      "loss_gap": -0.0672,
+      "stratified": {
+        "high_freq_count": 11528,
+        "low_freq_count": 4472,
+        "high_freq_company_auc": 0.6061,
+        "low_freq_company_auc": 0.2369
+      }
+    }
+  ]
+}
