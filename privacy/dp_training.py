@@ -121,6 +121,14 @@ def train_dp(
     torch.manual_seed(seed)
 
     model = model_class(*model_args).to(device)
+
+    # Validate and fix model for Opacus compatibility (replaces incompatible
+    # layers like LayerNorm with Opacus-compatible equivalents)
+    from opacus.validators import ModuleValidator
+
+    if not ModuleValidator.is_valid(model):
+        model = ModuleValidator.fix(model).to(device)
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size)
