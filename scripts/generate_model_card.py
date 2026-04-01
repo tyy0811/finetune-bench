@@ -284,8 +284,8 @@ def _load_baseline_from_results() -> dict | None:
     # Aggregate DL variants (M1, M2, M3) by variant across seeds
     variant_f1s: dict[str, list[float]] = defaultdict(list)
     for r in all_results:
-        if "epochs" in r and r["variant"] in ("M1", "M2", "M3"):
-            variant_f1s[r["variant"]].append(r["epochs"][-1]["val_macro_f1"])
+        if r["variant"] in ("M1", "M2", "M3") and "test_macro_f1" in r:
+            variant_f1s[r["variant"]].append(r["test_macro_f1"])
 
     variant_notes = {
         "M1": "DistilBERT baseline",
