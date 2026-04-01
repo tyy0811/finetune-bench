@@ -76,3 +76,11 @@ All model card inputs are serialized to `artifacts/` as JSON files (data audit, 
 ## Design Decision #13: Frozen DistilBERT encoder for DP-SGD training
 
 Opacus 1.4 cannot compute per-sample gradients through DistilBERT's multi-head attention and LayerNorm layers — the backward hooks produce inconsistent gradient shapes across parameters. Freezing the encoder and DP-training only the tabular MLP + fusion head (66K trainable params) is the standard workaround documented by the Opacus team for transformer architectures. The privacy guarantee applies to the trained parameters; the frozen encoder acts as a fixed feature extractor. This is a meaningful limitation: the DP model cannot adapt the text representations, so its utility ceiling is lower than the non-DP baseline which fine-tunes the full model.
+
+## Design Decision #14: T4 GPU over A10G for privacy workloads
+
+The DP-SGD training loop with a frozen encoder is dominated by the forward pass through DistilBERT (feature extraction only, no per-sample gradients on the encoder). This is compute-light enough for T4 (16 GB VRAM, ~8 TFLOPS) — each of the 12 runs completes in under 15 minutes. A10G (24 GB, ~31 TFLOPS) would be faster but costs ~3× more per hour. Since the runs parallelize via Modal starmap, wall-clock time is bounded by the slowest run regardless of GPU tier. T4 is the right cost-performance point for this workload.
+
+## Design Decision #15: Model cards as governance artifact
+
+Model cards (Mitchell et al. 2019) are the industry-standard documentation format for ML model governance and are increasingly referenced by the EU AI Act's transparency requirements. The model card auto-generates from JSON artifacts so it stays current with the training pipeline rather than becoming stale documentation. All 8 Mitchell et al. sections are populated: model details, intended use, training data, evaluation results, fairness analysis, privacy, limitations & risks, and deployment recommendations.

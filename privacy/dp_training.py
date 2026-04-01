@@ -152,6 +152,7 @@ def train_dp(
 
     epoch_grad_norms: list[dict[str, float]] = []
     epoch_losses: list[float] = []
+    epoch_epsilons: list[float] = []
 
     for _epoch in range(epochs):
         dp_model.train()
@@ -175,6 +176,7 @@ def train_dp(
 
         avg_loss = total_loss / max(step_count, 1)
         epoch_losses.append(avg_loss)
+        epoch_epsilons.append(privacy_engine.get_epsilon(delta))
 
     # Evaluate on validation set
     dp_model.eval()
@@ -206,6 +208,7 @@ def train_dp(
         "val_accuracy": metrics.accuracy,
         "per_class_f1": metrics.per_class_f1.tolist(),
         "epoch_losses": epoch_losses,
+        "epoch_epsilons": epoch_epsilons,
         "gradient_norms_sample": epoch_grad_norms[:5] if epoch_grad_norms else [],
         "model_state_dict": model_state,
     }

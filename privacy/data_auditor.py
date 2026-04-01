@@ -67,6 +67,44 @@ def scan_residual_pii(texts: list[str]) -> dict:
     }
 
 
+def scan_pii_with_ner(texts: list[str], model_name: str = "en_core_web_sm") -> dict:
+    """NER-based PII scan using spaCy for names, organizations, and locations.
+
+    Complements the regex scan by catching entity types that regexes miss
+    (e.g., person names, GPE). Requires the spaCy model to be installed:
+        python -m spacy download en_core_web_sm
+
+    Returns dict with counts per entity type and a 'total' field.
+    """
+    try:
+        import spacy
+    except ImportError:
+        return {"available": False, "reason": "spacy not installed"}
+
+    try:
+        nlp = spacy.load(model_name)
+    except OSError:
+        return {"available": False, "reason": f"spacy model '{model_name}' not found"}
+
+    # PII-relevant entity types
+    pii_types = {"PERSON", "GPE", "LOC", "ORG"}
+    counts: dict[str, int] = {t: 0 for t in sorted(pii_types)}
+    total = 0
+
+    for doc in nlp.pipe(texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"]):
+        for ent in doc.ents:
+            if ent.label_ in pii_types:
+                counts[ent.label_] = counts.get(ent.label_, 0) + 1
+                total += 1
+
+    return {
+        "available": True,
+        "model": model_name,
+        "counts": counts,
+        "total": total,
+    }
+
+
 # Columns that could serve as protected attributes or proxy variables.
 _SENSITIVE_COLUMN_NAMES = {
     "company", "state", "submitted_via", "zip_code",
@@ -114,6 +152,7 @@ def run_audit(
     output_path: Path | None = None,
     max_residual_pii: int | None = None,
     short_narrative_threshold: int = 20,
+    run_ner: bool = True,
 ) -> dict:
     """Run the full data privacy audit.
 
@@ -123,6 +162,7 @@ def run_audit(
     """
     redaction = detect_redaction_markers(narratives)
     pii = scan_residual_pii(narratives)
+    ner_pii = scan_pii_with_ner(narratives) if run_ner else {"available": False, "reason": "skipped"}
     duplicates = detect_near_duplicates(narratives)
     sensitive = inventory_sensitive_columns(columns)
 
@@ -146,6 +186,15 @@ def run_audit(
     assessment = ". ".join(assessment_parts) + "." if assessment_parts else "No issues found."
 
     report: dict = {
+        "data_sources": [
+            {
+                "name": "CFPB Consumer Complaints Database",
+                "url": "https://www.consumerfinance.gov/data-research/consumer-complaints/",
+                "license": "Public domain (U.S. Government work, CC0 1.0)",
+                "collection_method": "Consumer-submitted complaints via CFPB portal",
+                "pii_treatment": "CFPB redacts PII before publication (XX/XX/XXXX, XXXX patterns)",
+            }
+        ],
         "total_samples": len(narratives),
         "redaction_markers": {
             "count": redaction["count"],
@@ -153,6 +202,7 @@ def run_audit(
             "verified_from_sample": True,
         },
         "residual_pii": pii,
+        "ner_pii": ner_pii,
         "sensitive_columns": sensitive,
         "near_duplicates": duplicates,
         "short_narratives": {
