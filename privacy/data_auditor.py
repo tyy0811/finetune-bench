@@ -179,6 +179,8 @@ def main() -> None:
     adapter = CFPBAdapter(sample_size=20_000, seed=42)
     splits = adapter.preprocess()
 
+    # Audit only the training split — PII gate and memorization metrics should
+    # describe data the model trains on, not holdout sets (see review discussion).
     all_narratives = splits["train"]["narratives"]
 
     # CFPB columns that are used for feature engineering

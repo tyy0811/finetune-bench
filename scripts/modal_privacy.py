@@ -156,10 +156,12 @@ def train_dp_model(config: dict, seed: int) -> dict:
     result["config_name"] = config["name"]
     result["seed"] = seed
 
-    # Save model state to volume for MIA
+    # Save trained model state to volume for MIA
     checkpoint_name = f"M2_dp_{config['name']}_seed{seed}_best.pt"
     vol_path = f"/data/{checkpoint_name}"
-    torch.save(make_model().state_dict(), vol_path)
+    model_state = result.pop("model_state_dict")
+    torch.save(model_state, vol_path)
+    vol.commit()
     result["checkpoint_path"] = checkpoint_name
 
     return result

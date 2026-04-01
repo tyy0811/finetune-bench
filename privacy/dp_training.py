@@ -168,6 +168,10 @@ def train_dp(
 
     eps_actual = privacy_engine.get_epsilon(delta)
 
+    # Extract trained weights from the Opacus-wrapped model
+    trained_module = getattr(dp_model, "_module", dp_model)
+    model_state = trained_module.state_dict()
+
     return {
         "epsilon_target": epsilon,
         "epsilon_actual": eps_actual,
@@ -179,4 +183,5 @@ def train_dp(
         "per_class_f1": metrics.per_class_f1.tolist(),
         "epoch_losses": epoch_losses,
         "gradient_norms_sample": epoch_grad_norms[:5] if epoch_grad_norms else [],
+        "model_state_dict": model_state,
     }
