@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from transformers import DistilBertModel
 
 from models.fusion_model import MultimodalClassifier
 
@@ -85,3 +86,29 @@ class TestFusionModel:
         tabular = torch.randn(batch_size, 120)
         logits = model_with_dropout(text_inputs, tabular)
         assert logits.shape == (batch_size, 10)
+
+
+class TestCustomEncoder:
+    def test_accepts_prebuilt_encoder(self):
+        encoder = DistilBertModel.from_pretrained("distilbert-base-uncased")
+        model = MultimodalClassifier(
+            num_classes=10,
+            tabular_input_dim=120,
+            text_encoder=encoder,
+        )
+        batch_size = 2
+        text_inputs = {
+            "input_ids": torch.randint(0, 1000, (batch_size, 16)),
+            "attention_mask": torch.ones(batch_size, 16, dtype=torch.long),
+        }
+        tabular = torch.randn(batch_size, 120)
+        logits = model(text_inputs, tabular)
+        assert logits.shape == (batch_size, 10)
+        assert model.text_encoder is encoder
+
+    def test_default_encoder_unchanged(self):
+        model = MultimodalClassifier(
+            num_classes=10,
+            tabular_input_dim=120,
+        )
+        assert model.text_encoder.config.dim == 768
