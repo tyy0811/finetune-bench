@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import modal
-import torch
 
 # Resolve repo root relative to this script (works on any checkout)
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -81,6 +80,13 @@ def _setup_remote():
         vol.commit()
 
 
+@app.function(gpu="T4", timeout=600, image=image, volumes={"/data": vol})
+def _prewarm_data():
+    """Ensure CFPB data is cached on the volume before parallel jobs start."""
+    _setup_remote()
+    print("Data prewarm complete.")
+
+
 def _build_datasets(splits, config):
     """Build ComplaintDataset instances for train/val from adapter splits."""
     from transformers import DistilBertTokenizer
@@ -124,38 +130,33 @@ def _flatten_complaint_dataset(dataset):
     return torch.utils.data.TensorDataset(input_ids, attention_mask, tabular, labels)
 
 
-class _OpacusMultimodalWrapper(torch.nn.Module):
-    """Wrapper that gives MultimodalClassifier a flat-tensor forward signature.
-
-    Opacus needs forward(input_ids, attention_mask, tabular) → logits.
-    This wrapper unpacks flat tensors into the dict format the inner
-    model expects.
-    """
-
-    def __init__(self, inner):
-        super().__init__()
-        self.inner = inner
-        # Freeze DistilBERT — Opacus 1.4 cannot compute per-sample
-        # gradients through transformer attention/LayerNorm
-        for p in self.inner.text_encoder.parameters():
-            p.requires_grad = False
-
-    def forward(self, input_ids, attention_mask, tabular):
-        text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
-        return self.inner(text_inputs, tabular)
-
-
 @app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
 def train_dp_model(config: dict, seed: int) -> dict:
     """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
     _setup_remote()
 
     import torch
+    import torch.nn as nn
 
     from adapters.cfpb import CFPBAdapter
     from models.fusion_model import MultimodalClassifier
     from privacy.dp_training import train_dp
     from training.config import TrainConfig
+
+    class _OpacusMultimodalWrapper(nn.Module):
+        """Flat-tensor forward signature for Opacus compatibility."""
+
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+            # Freeze DistilBERT — Opacus 1.4 cannot compute per-sample
+            # gradients through transformer attention/LayerNorm
+            for p in self.inner.text_encoder.parameters():
+                p.requires_grad = False
+
+        def forward(self, input_ids, attention_mask, tabular):
+            text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
+            return self.inner(text_inputs, tabular)
 
     adapter = CFPBAdapter(sample_size=20_000, seed=seed)
     splits = adapter.preprocess()
@@ -319,6 +320,11 @@ def main(
         )
         print(json.dumps({k: v for k, v in result.items() if k != "model_state_dict"}, indent=2))
         return
+
+    if dp_train or mia or all:
+        # Ensure data is cached on volume before parallel dispatch
+        print("Prewarming data cache...")
+        _prewarm_data.remote()
 
     if dp_train or all:
         print(f"Dispatching {len(DP_CONFIGS) * len(SEEDS)} DP training runs...")
