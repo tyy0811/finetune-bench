@@ -1,4 +1,13 @@
 {
+  "data_sources": [
+    {
+      "name": "CFPB Consumer Complaints Database",
+      "url": "https://www.consumerfinance.gov/data-research/consumer-complaints/",
+      "license": "Public domain (U.S. Government work, CC0 1.0)",
+      "collection_method": "Consumer-submitted complaints via CFPB portal",
+      "pii_treatment": "CFPB redacts PII before publication (XX/XX/XXXX, XXXX patterns)"
+    }
+  ],
   "total_samples": 16000,
   "redaction_markers": {
     "count": 223294,
@@ -14,6 +23,17 @@
     "phones": 2,
     "ssns": 0,
     "total": 7
+  },
+  "ner_pii": {
+    "available": true,
+    "model": "en_core_web_sm",
+    "counts": {
+      "GPE": 18365,
+      "LOC": 67,
+      "ORG": 59799,
+      "PERSON": 36527
+    },
+    "total": 114758
   },
   "sensitive_columns": [
     "company",
