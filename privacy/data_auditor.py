@@ -86,7 +86,8 @@ def _normalize_text(text: str) -> str:
 def detect_near_duplicates(texts: list[str]) -> dict:
     """Find exact duplicates after text normalization.
 
-    Returns dict with 'count' (number of duplicate pairs) and 'method'.
+    Returns dict with 'count' (number of duplicate pairs, i.e. C(n,2)
+    for each group of n identical texts) and 'method'.
     """
     from collections import Counter
 
@@ -94,7 +95,7 @@ def detect_near_duplicates(texts: list[str]) -> dict:
     for text in texts:
         seen[_normalize_text(text)] += 1
 
-    duplicate_count = sum(count - 1 for count in seen.values() if count > 1)
+    duplicate_count = sum(n * (n - 1) // 2 for n in seen.values() if n > 1)
     return {"count": duplicate_count, "method": "exact_normalized"}
 
 
@@ -182,11 +183,7 @@ def main() -> None:
     adapter = CFPBAdapter(sample_size=20_000, seed=42)
     splits = adapter.preprocess()
 
-    all_narratives = (
-        splits["train"]["narratives"]
-        + splits["val"]["narratives"]
-        + splits["test"]["narratives"]
-    )
+    all_narratives = splits["train"]["narratives"]
 
     # CFPB columns that are used for feature engineering
     columns = ["company", "state", "submitted_via"]

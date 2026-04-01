@@ -92,6 +92,11 @@ class TestNearDuplicateDetection:
         result = detect_near_duplicates(texts)
         assert result["count"] >= 1
 
+    def test_triple_duplicate_counts_pairs(self):
+        texts = ["same text", "same text", "same text"]
+        result = detect_near_duplicates(texts)
+        assert result["count"] == 3  # C(3,2) = 3 pairs
+
     def test_no_duplicates(self):
         texts = ["first complaint", "second complaint", "third complaint"]
         result = detect_near_duplicates(texts)
