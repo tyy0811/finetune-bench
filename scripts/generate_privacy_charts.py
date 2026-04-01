@@ -42,7 +42,7 @@ def plot_privacy_utility_tradeoff():
     labels = [r["config"] for r in configs]
 
     ax.errorbar(epsilons, f1s, yerr=stds, fmt="o-", color="#e74c3c",
-                capsize=5, linewidth=2, markersize=8, label="DP-SGD (frozen encoder)")
+                capsize=5, linewidth=2, markersize=8, label="DP-SGD (full model)")
 
     for eps, f1, label in zip(epsilons, f1s, labels):
         ax.annotate(label, (eps, f1), textcoords="offset points",
@@ -58,7 +58,7 @@ def plot_privacy_utility_tradeoff():
 
     ax.set_xlabel("Privacy Budget (ε)", fontsize=12)
     ax.set_ylabel("Macro-F1", fontsize=12)
-    ax.set_title("Privacy-Utility Tradeoff: DP-SGD with Frozen Encoder", fontsize=14)
+    ax.set_title("Privacy-Utility Tradeoff: DP-SGD via dp-transformers", fontsize=14)
     ax.legend(loc="center right", fontsize=10)
     ax.set_xscale("log")
     ax.set_ylim(0, max(0.75, (baseline_f1 or 0.7) + 0.1))
