@@ -150,6 +150,8 @@ def train_dp_vmap(
 
     model = model.to(device)
     model.eval()  # disable dropout — vmap can't trace data-dependent dropout
+    if class_weights is not None:
+        class_weights = class_weights.to(device)
 
     # Split parameters
     trainable_params = {}
