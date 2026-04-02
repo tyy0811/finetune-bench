@@ -195,3 +195,110 @@ class TestTrainDpVmap:
                            delta=1e-5, device="cpu")
         # Different noise → different loss trajectories
         assert r1["epoch_losses"] != r2["epoch_losses"]
+
+
+class TestVmapMultimodalIntegration:
+    """Full integration: vmap DP-SGD on MultimodalClassifier + LoRA."""
+
+    def test_lora_head_per_group_clipping(self):
+        pytest.importorskip("peft")
+        import numpy as np
+        from peft import LoraConfig, get_peft_model
+        from transformers import DistilBertModel, DistilBertTokenizer
+
+        from models.fusion_model import MultimodalClassifier
+        from privacy.vmap_dp import train_dp_vmap
+        from training.train import ComplaintDataset
+
+        tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+        num_classes, tabular_dim = 3, 5
+
+        train_narratives = [f"complaint about issue {i}" for i in range(32)]
+        val_narratives = [f"different complaint {i}" for i in range(8)]
+        train_tabular = np.random.randn(32, tabular_dim).astype(np.float32)
+        val_tabular = np.random.randn(8, tabular_dim).astype(np.float32)
+        train_labels = np.random.randint(0, num_classes, 32)
+        val_labels = np.random.randint(0, num_classes, 8)
+
+        train_ds = ComplaintDataset(
+            train_narratives, train_tabular, train_labels, tokenizer, max_length=32,
+        )
+        val_ds = ComplaintDataset(
+            val_narratives, val_tabular, val_labels, tokenizer, max_length=32,
+        )
+
+        flat_train = torch.utils.data.TensorDataset(
+            train_ds.encodings["input_ids"],
+            train_ds.encodings["attention_mask"],
+            train_ds.tabular_features,
+            train_ds.labels,
+        )
+        flat_val = torch.utils.data.TensorDataset(
+            val_ds.encodings["input_ids"],
+            val_ds.encodings["attention_mask"],
+            val_ds.tabular_features,
+            val_ds.labels,
+        )
+
+        # Build model: eager attention + LoRA
+        encoder = DistilBertModel.from_pretrained(
+            "distilbert-base-uncased", attn_implementation="eager",
+        )
+        model = MultimodalClassifier(
+            num_classes=num_classes, tabular_input_dim=tabular_dim,
+            text_encoder=encoder,
+        )
+        lora_config = LoraConfig(
+            r=8, lora_alpha=16, lora_dropout=0.0,  # dropout=0 for vmap
+            target_modules=["q_lin", "v_lin"], bias="none",
+        )
+        model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+
+        for name, p in model.named_parameters():
+            is_lora = "lora_" in name
+            is_head = any(x in name for x in ["tabular_mlp", "fusion_head"])
+            p.requires_grad = is_lora or is_head
+
+        # Per-group config
+        lora_names = [n for n, p in model.named_parameters() if "lora_" in n and p.requires_grad]
+        head_names = [n for n, p in model.named_parameters()
+                      if any(x in n for x in ["tabular_mlp", "fusion_head"]) and p.requires_grad]
+        groups = {
+            "lora": {"params": lora_names, "clip_norm": 0.1},
+            "head": {"params": head_names, "clip_norm": 1.0},
+        }
+
+        # Loss function for vmap (per-sample, no batch dim)
+        def loss_fn(trainable, frozen, bufs, input_ids, attention_mask, tabular, label):
+            all_p = {**frozen, **trainable}
+            out = torch.func.functional_call(
+                model, (all_p, bufs), args=(),
+                kwargs={
+                    "text_inputs": {
+                        "input_ids": input_ids.unsqueeze(0),
+                        "attention_mask": attention_mask.unsqueeze(0),
+                    },
+                    "tabular_features": tabular.unsqueeze(0),
+                },
+            )
+            return nn.functional.cross_entropy(out, label.unsqueeze(0))
+
+        # Predict function for evaluation (batch-level, dict inputs)
+        def predict_fn(m, input_ids, attention_mask, tabular):
+            return m(
+                {"input_ids": input_ids, "attention_mask": attention_mask},
+                tabular,
+            )
+
+        result = train_dp_vmap(
+            model=model, loss_fn=loss_fn,
+            train_dataset=flat_train, val_dataset=flat_val,
+            groups=groups, num_classes=num_classes,
+            epochs=1, batch_size=4, lr=2e-5,
+            epsilon=50.0, delta=1e-5, device="cpu",
+            predict_fn=predict_fn,
+        )
+
+        assert result["epsilon_actual"] > 0
+        assert "val_macro_f1" in result
+        assert result["train_loss"] > 0
