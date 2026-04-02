@@ -48,10 +48,11 @@ vol = modal.Volume.from_name("finetune-bench-privacy-data", create_if_missing=Tr
 
 # Experiment matrix: 4 DP configs x 3 seeds = 12 runs
 DP_CONFIGS = [
-    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "strict_dp_tuned_clip", "epsilon": 1.0, "delta": 1e-5, "max_grad_norm": 0.5},
+    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5},
+    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5},
+    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5},
+    {"name": "strict_dp_tuned_clip", "epsilon": 1.0, "delta": 1e-5,
+     "lora_clip": 0.05, "head_clip": 0.5},
 ]
 SEEDS = [42, 123, 456]
 
