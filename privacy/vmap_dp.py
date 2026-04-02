@@ -96,15 +96,21 @@ def _calibrate_noise(
     delta: float,
     sample_rate: float,
     epochs: int,
+    num_groups: int = 1,
 ) -> float:
-    """Use Opacus to calibrate noise_multiplier for a target (epsilon, delta)."""
+    """Use Opacus to calibrate noise_multiplier for a target (epsilon, delta).
+
+    Each physical training step releases num_groups noised aggregates (one per
+    parameter group). Under RDP composition these are independent mechanisms,
+    so the total number of mechanism invocations is steps * num_groups.
+    """
     from opacus.accountants.utils import get_noise_multiplier
 
     return get_noise_multiplier(
         target_epsilon=epsilon,
         target_delta=delta,
         sample_rate=sample_rate,
-        epochs=epochs,
+        epochs=epochs * num_groups,
     )
 
 
@@ -158,7 +164,8 @@ def train_dp_vmap(
 
     # Calibrate noise
     sample_rate = batch_size / len(train_dataset)
-    noise_multiplier = _calibrate_noise(epsilon, delta, sample_rate, epochs)
+    num_groups = len(groups)
+    noise_multiplier = _calibrate_noise(epsilon, delta, sample_rate, epochs, num_groups)
 
     # Privacy accountant
     accountant = RDPAccountant()
@@ -198,8 +205,9 @@ def train_dp_vmap(
                 for name, param in trainable_params.items():
                     param -= lr * noised[name]
 
-            # Track privacy
-            accountant.step(noise_multiplier=noise_multiplier, sample_rate=sample_rate)
+            # Track privacy — one mechanism invocation per group per step
+            for _ in groups:
+                accountant.step(noise_multiplier=noise_multiplier, sample_rate=sample_rate)
 
             # Compute loss for logging (forward only, no grad)
             with torch.no_grad():
