@@ -130,6 +130,7 @@ def train_dp_vmap(
     seed: int = 42,
     class_weights: torch.Tensor | None = None,
     predict_fn: callable | None = None,
+    optimizer_type: str = "sgd",
 ) -> dict:
     """Train with manual DP-SGD via vmap and per-group clipping.
 
@@ -137,7 +138,7 @@ def train_dp_vmap(
     not for model wrapping.
 
     predict_fn: optional (model, *batch_inputs) -> logits. Defaults to model(*inputs).
-    Needed for models with non-standard forward signatures (e.g. dict inputs).
+    optimizer_type: "sgd" (manual update) or "adam" (adaptive LR per parameter).
     """
     from opacus.accountants import RDPAccountant
 
@@ -177,6 +178,12 @@ def train_dp_vmap(
     )
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size)
 
+    # Build optimizer
+    if optimizer_type == "adam":
+        optimizer = torch.optim.Adam(trainable_params.values(), lr=lr)
+    else:
+        optimizer = None  # manual SGD
+
     epoch_losses: list[float] = []
     epoch_epsilons: list[float] = []
 
@@ -202,10 +209,18 @@ def train_dp_vmap(
             # 4. Add calibrated noise per group
             noised = add_group_noise(averaged, groups, noise_multiplier, batch_size)
 
-            # 5. SGD update
-            with torch.no_grad():
+            # 5. Parameter update
+            if optimizer is not None:
+                # Feed noised gradients to Adam
                 for name, param in trainable_params.items():
-                    param -= lr * noised[name]
+                    param.grad = noised[name]
+                optimizer.step()
+                optimizer.zero_grad()
+            else:
+                # Manual SGD
+                with torch.no_grad():
+                    for name, param in trainable_params.items():
+                        param -= lr * noised[name]
 
             # Track privacy — one mechanism invocation per group per step
             for _ in groups:

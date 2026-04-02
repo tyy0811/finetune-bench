@@ -236,10 +236,12 @@ def train_dp_model(config: dict, seed: int) -> dict:
         groups=groups, num_classes=num_classes,
         epochs=config.get("epochs", 10),
         batch_size=config.get("batch_size", 16),
-        lr=2e-5, epsilon=config["epsilon"], delta=config["delta"],
+        lr=config.get("lr", 2e-5),
+        epsilon=config["epsilon"], delta=config["delta"],
         device="cuda" if torch.cuda.is_available() else "cpu",
         seed=seed, class_weights=class_weights,
         predict_fn=predict_fn,
+        optimizer_type=config.get("optimizer", "sgd"),
     )
 
     result["config_name"] = config["name"]
@@ -548,12 +550,27 @@ def main(
     artifacts.mkdir(exist_ok=True)
 
     if test:
-        print("Running single validation run (moderate_dp, seed=42, T4)...")
-        result = train_dp_model.remote(
-            {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5},
-            42,
-        )
-        print(json.dumps({k: v for k, v in result.items() if k != "model_state_dict"}, indent=2))
+        print("Running 3 diagnostic configs in parallel (seed=42, T4)...")
+        _prewarm_data.remote()
+        diag_configs = [
+            # 1. ε=50, SGD, lr=2e-5 — is the noise too high, or is the optimizer broken?
+            ({"name": "diag_e50_sgd", "epsilon": 50.0, "delta": 1e-5,
+              "epochs": 3, "optimizer": "sgd", "lr": 2e-5}, 42),
+            # 2. ε=8, Adam, lr=2e-5 — adaptive LR normalizes noisy gradients
+            ({"name": "diag_e8_adam", "epsilon": 8.0, "delta": 1e-5,
+              "epochs": 3, "optimizer": "adam", "lr": 2e-5}, 42),
+            # 3. ε=8, SGD, lr=1e-3 — 50× higher LR to exceed noise floor
+            ({"name": "diag_e8_sgd_highlr", "epsilon": 8.0, "delta": 1e-5,
+              "epochs": 3, "optimizer": "sgd", "lr": 1e-3}, 42),
+        ]
+        results = list(train_dp_model.starmap(diag_configs))
+        print("\n=== DIAGNOSTIC RESULTS ===")
+        for r in results:
+            print("{:<25} F1={:.4f}  acc={:.4f}  loss={:.4f}  eps={:.2f}  per_class_f1={}".format(
+                r["config_name"], r["val_macro_f1"], r["val_accuracy"],
+                r["train_loss"], r["epsilon_actual"],
+                [round(x, 3) for x in r["per_class_f1"]],
+            ))
         return
 
     if diag:
