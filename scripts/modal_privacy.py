@@ -132,7 +132,7 @@ def _flatten_complaint_dataset(dataset):
     return torch.utils.data.TensorDataset(input_ids, attention_mask, tabular, labels)
 
 
-@app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
+@app.function(gpu="T4", timeout=86400, image=image, volumes={"/data": vol})
 def train_dp_model(config: dict, seed: int) -> dict:
     """Train DistilBERT+LoRA with vmap DP-SGD and per-group clipping."""
     _setup_remote()
@@ -553,15 +553,14 @@ def main(
         print("Running 3 diagnostic configs in parallel (seed=42, T4)...")
         _prewarm_data.remote()
         diag_configs = [
-            # 1. ε=50, SGD, lr=2e-5 — is the noise too high, or is the optimizer broken?
-            ({"name": "diag_e50_sgd", "epsilon": 50.0, "delta": 1e-5,
-              "epochs": 3, "optimizer": "sgd", "lr": 2e-5}, 42),
-            # 2. ε=8, Adam, lr=2e-5 — adaptive LR normalizes noisy gradients
-            ({"name": "diag_e8_adam", "epsilon": 8.0, "delta": 1e-5,
-              "epochs": 3, "optimizer": "adam", "lr": 2e-5}, 42),
-            # 3. ε=8, SGD, lr=1e-3 — 50× higher LR to exceed noise floor
-            ({"name": "diag_e8_sgd_highlr", "epsilon": 8.0, "delta": 1e-5,
-              "epochs": 3, "optimizer": "sgd", "lr": 1e-3}, 42),
+            # Round 3: find the ceiling and test the curve
+            # Stop criterion: F1 >= 0.30 at ε=50/10ep, else Path D
+            ({"name": "e50_adam_10ep", "epsilon": 50.0, "delta": 1e-5,
+              "epochs": 10, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e50_adam_20ep", "epsilon": 50.0, "delta": 1e-5,
+              "epochs": 20, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e8_adam_10ep", "epsilon": 8.0, "delta": 1e-5,
+              "epochs": 10, "optimizer": "adam", "lr": 1e-3}, 42),
         ]
         results = list(train_dp_model.starmap(diag_configs))
         print("\n=== DIAGNOSTIC RESULTS ===")

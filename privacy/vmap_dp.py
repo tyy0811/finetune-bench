@@ -237,8 +237,11 @@ def train_dp_vmap(
             total_loss += loss
             step_count += 1
 
-        epoch_losses.append(total_loss / max(step_count, 1))
-        epoch_epsilons.append(accountant.get_epsilon(delta))
+        avg_loss = total_loss / max(step_count, 1)
+        eps_so_far = accountant.get_epsilon(delta)
+        epoch_losses.append(avg_loss)
+        epoch_epsilons.append(eps_so_far)
+        print(f"  epoch {_epoch+1}/{epochs}  loss={avg_loss:.4f}  eps={eps_so_far:.2f}", flush=True)
 
     # Evaluate
     all_preds, all_labels = [], []
