@@ -89,3 +89,156 @@ def add_group_noise(
             noise = torch.randn(averaged_grads[name].shape, generator=gen) * sigma
             noised[name] = averaged_grads[name] + noise.to(averaged_grads[name].device)
     return noised
+
+
+def _calibrate_noise(
+    epsilon: float,
+    delta: float,
+    sample_rate: float,
+    epochs: int,
+) -> float:
+    """Use Opacus to calibrate noise_multiplier for a target (epsilon, delta)."""
+    from opacus.accountants.utils import get_noise_multiplier
+
+    return get_noise_multiplier(
+        target_epsilon=epsilon,
+        target_delta=delta,
+        sample_rate=sample_rate,
+        epochs=epochs,
+    )
+
+
+def train_dp_vmap(
+    model: torch.nn.Module,
+    loss_fn: callable,
+    train_dataset: torch.utils.data.Dataset,
+    val_dataset: torch.utils.data.Dataset,
+    groups: dict[str, dict],
+    num_classes: int,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    epsilon: float,
+    delta: float = 1e-5,
+    device: str = "cpu",
+    seed: int = 42,
+    class_weights: torch.Tensor | None = None,
+    predict_fn: callable | None = None,
+) -> dict:
+    """Train with manual DP-SGD via vmap and per-group clipping.
+
+    Uses Opacus only for noise calibration and privacy accounting,
+    not for model wrapping.
+
+    predict_fn: optional (model, *batch_inputs) -> logits. Defaults to model(*inputs).
+    Needed for models with non-standard forward signatures (e.g. dict inputs).
+    """
+    from opacus.accountants import RDPAccountant
+
+    from evaluation.metrics import compute_metrics
+
+    torch.manual_seed(seed)
+
+    if predict_fn is None:
+        predict_fn = lambda m, *args: m(*args)
+
+    model = model.to(device)
+    model.eval()  # disable dropout — vmap can't trace data-dependent dropout
+
+    # Split parameters
+    trainable_params = {}
+    frozen_params = {}
+    for name, p in model.named_parameters():
+        in_group = any(name in g["params"] for g in groups.values())
+        if in_group and p.requires_grad:
+            trainable_params[name] = p
+        else:
+            frozen_params[name] = p
+    buffers = dict(model.named_buffers())
+
+    # Calibrate noise
+    sample_rate = batch_size / len(train_dataset)
+    noise_multiplier = _calibrate_noise(epsilon, delta, sample_rate, epochs)
+
+    # Privacy accountant
+    accountant = RDPAccountant()
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, drop_last=True,
+    )
+    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size)
+
+    epoch_losses: list[float] = []
+    epoch_epsilons: list[float] = []
+
+    for _epoch in range(epochs):
+        total_loss = 0.0
+        step_count = 0
+
+        for batch in train_loader:
+            *inputs, labels = [t.to(device) for t in batch]
+
+            # 1. Per-sample gradients via vmap
+            per_sample_grads = compute_per_sample_grads(
+                loss_fn, trainable_params, frozen_params, buffers,
+                *inputs, labels,
+            )
+
+            # 2. Per-group clipping
+            clipped = clip_per_group(per_sample_grads, groups)
+
+            # 3. Average across batch
+            averaged = {name: g.mean(dim=0) for name, g in clipped.items()}
+
+            # 4. Add calibrated noise per group
+            noised = add_group_noise(averaged, groups, noise_multiplier, batch_size)
+
+            # 5. SGD update
+            with torch.no_grad():
+                for name, param in trainable_params.items():
+                    param -= lr * noised[name]
+
+            # Track privacy
+            accountant.step(noise_multiplier=noise_multiplier, sample_rate=sample_rate)
+
+            # Compute loss for logging (forward only, no grad)
+            with torch.no_grad():
+                out = predict_fn(model, *inputs)
+                if out.dim() == 1:
+                    out = out.unsqueeze(0)
+                loss = torch.nn.functional.cross_entropy(
+                    out, labels, weight=class_weights,
+                ).item()
+            total_loss += loss
+            step_count += 1
+
+        epoch_losses.append(total_loss / max(step_count, 1))
+        epoch_epsilons.append(accountant.get_epsilon(delta))
+
+    # Evaluate
+    all_preds, all_labels = [], []
+    with torch.no_grad():
+        for batch in val_loader:
+            *inputs, labels = [t.to(device) for t in batch]
+            out = predict_fn(model, *inputs)
+            if out.dim() == 1:
+                out = out.unsqueeze(0)
+            all_preds.extend(out.argmax(dim=1).cpu().tolist())
+            all_labels.extend(labels.cpu().tolist())
+
+    class_names = [str(i) for i in range(num_classes)]
+    metrics = compute_metrics(all_labels, all_preds, class_names)
+
+    return {
+        "epsilon_target": epsilon,
+        "epsilon_actual": accountant.get_epsilon(delta),
+        "delta": delta,
+        "noise_multiplier": noise_multiplier,
+        "train_loss": epoch_losses[-1] if epoch_losses else 0.0,
+        "val_macro_f1": metrics.macro_f1,
+        "val_accuracy": metrics.accuracy,
+        "per_class_f1": metrics.per_class_f1.tolist(),
+        "epoch_losses": epoch_losses,
+        "epoch_epsilons": epoch_epsilons,
+        "model_state_dict": model.state_dict(),
+    }

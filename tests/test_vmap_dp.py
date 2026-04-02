@@ -121,3 +121,77 @@ class TestVmapPerSampleGrad:
             assert torch.allclose(manual_grad, vmap_grad, atol=1e-5), (
                 f"Sample {i}: max diff = {(manual_grad - vmap_grad).abs().max()}"
             )
+
+
+class TestTrainDpVmap:
+    """Integration test: vmap DP training on a simple model."""
+
+    def test_train_dp_vmap_returns_metrics(self):
+        from privacy.vmap_dp import train_dp_vmap
+
+        model = nn.Sequential(nn.Linear(10, 5), nn.ReLU(), nn.Linear(5, 3))
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(32, 10), torch.randint(0, 3, (32,))
+        )
+        val = torch.utils.data.TensorDataset(
+            torch.randn(8, 10), torch.randint(0, 3, (8,))
+        )
+
+        def loss_fn(params, frozen, bufs, x, y):
+            out = torch.func.functional_call(model, (params, bufs), (x.unsqueeze(0),))
+            return nn.functional.cross_entropy(out, y.unsqueeze(0))
+
+        groups = {
+            "all": {
+                "params": [n for n, _ in model.named_parameters()],
+                "clip_norm": 1.0,
+            },
+        }
+
+        result = train_dp_vmap(
+            model=model,
+            loss_fn=loss_fn,
+            train_dataset=dataset,
+            val_dataset=val,
+            groups=groups,
+            num_classes=3,
+            epochs=2,
+            batch_size=8,
+            lr=0.01,
+            epsilon=50.0,
+            delta=1e-5,
+            device="cpu",
+        )
+        assert "epsilon_actual" in result
+        assert result["epsilon_actual"] > 0
+        assert "val_macro_f1" in result
+        assert "epoch_losses" in result
+        assert len(result["epoch_losses"]) == 2
+
+    def test_stricter_epsilon_changes_result(self):
+        from privacy.vmap_dp import train_dp_vmap
+
+        model = nn.Sequential(nn.Linear(10, 3))
+        dataset = torch.utils.data.TensorDataset(
+            torch.randn(32, 10), torch.randint(0, 3, (32,))
+        )
+        val = torch.utils.data.TensorDataset(
+            torch.randn(8, 10), torch.randint(0, 3, (8,))
+        )
+
+        def loss_fn(params, frozen, bufs, x, y):
+            out = torch.func.functional_call(model, ({**params, **bufs}, {}), (x.unsqueeze(0),))
+            return nn.functional.cross_entropy(out, y.unsqueeze(0))
+
+        groups = {"all": {"params": [n for n, _ in model.named_parameters()], "clip_norm": 1.0}}
+
+        r1 = train_dp_vmap(model=model, loss_fn=loss_fn, train_dataset=dataset,
+                           val_dataset=val, groups=groups, num_classes=3,
+                           epochs=2, batch_size=8, lr=0.01, epsilon=50.0,
+                           delta=1e-5, device="cpu")
+        r2 = train_dp_vmap(model=model, loss_fn=loss_fn, train_dataset=dataset,
+                           val_dataset=val, groups=groups, num_classes=3,
+                           epochs=2, batch_size=8, lr=0.01, epsilon=2.0,
+                           delta=1e-5, device="cpu")
+        # Different noise → different loss trajectories
+        assert r1["epoch_losses"] != r2["epoch_losses"]
