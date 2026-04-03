@@ -4,7 +4,7 @@
 
 Multimodal classification benchmark where the headline fusion gain turned out to be entity memorization — and the ablation proved it.
 
-`58 tests` | `5 ablation variants` | `8 corruption conditions` | `fp16 mixed-precision` | `DP-SGD privacy` | `MIA evaluation` | `model card` | `Docker` | `ONNX export` | `CI green`
+`58 tests` | `5 ablation variants` | `8 corruption conditions` | `DP-SGD privacy` | `model card` | `ONNX export` | `CI`
 
 See [agent-bench](https://github.com/tyy0811/agent-bench) for agentic RAG and retrieval evaluation evidence.
 
@@ -229,7 +229,7 @@ Runs 4 configs (M2/M3 x fp32/fp16) x 3 seeds = 12 runs. Results saved to `result
 
 ## Privacy & Model Governance
 
-DP-SGD training, membership inference evaluation, data privacy audit, and model card generation — demonstrating responsible AI practices in the fine-tuning lifecycle.
+Privacy infrastructure for the fine-tuning lifecycle: DP-SGD training with per-group gradient clipping, membership inference evaluation, data privacy audit, and model card generation.
 
 ### Privacy-Utility Tradeoff
 
@@ -237,12 +237,12 @@ DP-SGD training, membership inference evaluation, data privacy audit, and model 
 
 | Config | Target ε | Actual ε | Macro-F1 |
 |--------|----------|----------|----------|
-| M2 baseline (no DP) | ∞ | — | 0.6555 +/- 0.0076 |
-| Loose DP | 50.0 | 49.99 | 0.0801 |
-| Moderate DP | 8.0 | 8.00 | 0.0801 |
-| Strict DP | 1.0 | 0.99 | 0.0801 |
+| LoRA baseline (no DP) | ∞ | — | 0.5412 ± 0.014 |
+| Loose DP | 50.0 | 50.00 | 0.3019 ± 0.015 |
+| Moderate DP | 8.0 | 8.00 | 0.2671 ± 0.012 |
+| Strict DP | 1.0 | 1.00 | 0.2078 ± 0.014 |
 
-*DP-SGD with frozen DistilBERT encoder (Opacus 1.4 limitation — see [DECISIONS.md](DECISIONS.md) #13). Only the tabular MLP + fusion head (66K params) are trained with differential privacy. The frozen encoder prevents the model from adapting text representations, collapsing utility. This is an honest limitation of applying DP to transformer architectures with current tooling.*
+*Manual DP-SGD via `torch.func.vmap` with per-group gradient clipping (LoRA: C=0.1, head: C=1.0) and Adam optimizer (lr=1e-3, 40 epochs). LoRA adapters (r=8) on DistilBERT attention + tabular MLP + fusion head trained under differential privacy. Seven approaches were tested before this solution — see [DECISIONS.md](DECISIONS.md) for the full diagnostic journey.*
 
 ### Membership Inference Attack
 
@@ -250,12 +250,12 @@ DP-SGD training, membership inference evaluation, data privacy audit, and model 
 
 | Model | ε | MIA AUC | Loss Gap | Interpretation |
 |-------|---|---------|----------|----------------|
-| M2 (no DP) | ∞ | 0.5253 | +0.13 | Slight memorization |
-| Loose DP | 50.0 | 0.4913 | -0.08 | Random guess |
-| Moderate DP | 8.0 | 0.4914 | -0.07 | Random guess |
-| Strict DP | 1.0 | 0.4918 | -0.06 | Random guess |
+| M2 (no DP) | ∞ | 0.5175 | +0.14 | Slight memorization |
+| Loose DP | 50.0 | 0.4820 | -0.08 | Random guess |
+| Moderate DP | 8.0 | 0.4890 | -0.06 | Random guess |
+| Strict DP | 1.0 | 0.4853 | -0.09 | Random guess |
 
-*Loss-threshold attack on 2000 balanced member/non-member samples. The non-DP model shows AUC slightly above random guess (0.53), consistent with limited memorization on this dataset. DP models show AUC ~0.49, confirming DP-SGD eliminates the memorization signal.*
+*Loss-threshold attack on 2000 balanced member/non-member samples.* The non-DP model shows slight memorization (AUC 0.52); all DP models collapse to random-guess (~0.49) regardless of ε. This binary pattern — where any DP eliminates memorization rather than reducing it proportionally — is consistent with recent findings on DP fine-tuning, where gradient clipping is the primary mechanism disrupting memorization signals. Combined with the concave F1 tradeoff (the steepest drop is from non-DP to ε=50, not from ε=50 to ε=1), the practical implication is that the dominant deployment decision is *whether* to use DP at all — tightening from ε=50 to ε=1 costs relatively little additional utility while memorization protection is already complete. Note: this evaluation uses a loss-threshold attack; calibrated attacks (Carlini et al. 2022) may detect residual signal at high ε.
 
 ### Data Privacy Audit
 
@@ -264,7 +264,7 @@ Pre-training audit of the CFPB training corpus (16,000 samples):
 - **Redaction markers:** 223,294 (CFPB source-level redaction working)
 - **Residual PII:** 7 instances (5 emails, 2 phones) — imperfect source redaction
 - **NER entities:** 114,758 (59,799 ORG, 36,527 PERSON, 18,365 GPE)
-- **Near-duplicates:** 34,754 pairs (exact normalized)
+- **Near-duplicates:** 34,754 pairs (exact normalized) — high relative to 16K samples. Duplicates across train/test splits inflate MIA AUC by giving members artificially low loss; the observed AUC of 0.53 may overstate true memorization.
 - **PII gate:** Enforced (`max_residual_pii=0`), exits non-zero when PII detected
 
 ### Model Card
@@ -313,3 +313,17 @@ python scripts/generate_model_card.py
 - `company_complaint_volume` computed on training split only, log-transformed and standardized
 - `company` shortcut acknowledged; M1 provides shortcut-free baseline; M2b diagnostic confirms fusion gain depends on company identity
 - All encoding categories (top-50 companies, states, channels) derived from training data only
+
+### V1 → V2 Evolution
+
+| Feature | V1 | V2 |
+|---------|----|----|
+| Ablation | 5 variants, 3 seeds | Same |
+| Robustness | 8 corruption conditions | Same |
+| ONNX export | fp32 + fp16 latency | Same |
+| fp16 training | AMP comparison on A10G | Same |
+| **DP-SGD** | None | vmap + per-group clipping, 7 approaches tested |
+| **MIA** | None | Loss-threshold, balanced subsampling |
+| **Data audit** | None | Dual-scan (redaction markers + residual PII) |
+| **Model card** | None | Auto-generated, 8 Mitchell et al. sections |
+| Tests | 45 | 58 |

@@ -52,10 +52,10 @@ without human oversight.
 
 | Config | Target epsilon | Actual epsilon | Macro-F1 |
 |--------|---------------|----------------|----------|
-| loose_dp | 50.0 | 49.9939 | 0.0801 +/- 0.0000 |
-| moderate_dp | 8.0 | 7.9973 | 0.0801 +/- 0.0000 |
-| strict_dp | 1.0 | 0.9917 | 0.0801 +/- 0.0000 |
-| strict_dp_tuned_clip | 1.0 | 0.9917 | 0.0801 +/- 0.0000 |
+| lora_baseline | inf | inf | 0.5412 +/- 0.0140 |
+| loose_dp | 50.0 | 49.9971 | 0.3019 +/- 0.0154 |
+| moderate_dp | 8.0 | 7.9983 | 0.2671 +/- 0.0116 |
+| strict_dp | 1.0 | 0.9971 | 0.2078 +/- 0.0143 |
 
 ## Fairness Analysis
 
@@ -74,32 +74,30 @@ This means complaints from underrepresented companies receive lower-quality pred
 
 | Config | Target epsilon | Actual epsilon | Macro-F1 |
 |--------|---------------|----------------|----------|
-| loose_dp | 50.0 | 49.9939 | 0.0801 +/- 0.0000 |
-| moderate_dp | 8.0 | 7.9973 | 0.0801 +/- 0.0000 |
-| strict_dp | 1.0 | 0.9917 | 0.0801 +/- 0.0000 |
-| strict_dp_tuned_clip | 1.0 | 0.9917 | 0.0801 +/- 0.0000 |
+| lora_baseline | inf | inf | 0.5412 +/- 0.0140 |
+| loose_dp | 50.0 | 49.9971 | 0.3019 +/- 0.0154 |
+| moderate_dp | 8.0 | 7.9983 | 0.2671 +/- 0.0116 |
+| strict_dp | 1.0 | 0.9971 | 0.2078 +/- 0.0143 |
 
 **Membership inference attack results:**
 
 | Model | epsilon | MIA AUC | Loss Gap | Members | Non-members |
 |-------|---------|---------|----------|---------|-------------|
-| M2_no_dp | inf | 0.53 | 0.13 | 2000 | 2000 |
-| loose_dp | 50.0 | 0.49 | -0.08 | 2000 | 2000 |
-| moderate_dp | 8.0 | 0.49 | -0.07 | 2000 | 2000 |
-| strict_dp | 1.0 | 0.49 | -0.06 | 2000 | 2000 |
-| strict_dp_tuned_clip | 1.0 | 0.49 | -0.07 | 2000 | 2000 |
+| M2_no_dp | inf | 0.52 | 0.14 | 2000 | 2000 |
+| loose_dp | 50.0 | 0.48 | -0.08 | 2000 | 2000 |
+| moderate_dp | 8.0 | 0.49 | -0.06 | 2000 | 2000 |
+| strict_dp | 1.0 | 0.49 | -0.09 | 2000 | 2000 |
 
 **Stratified MIA (entity frequency):**
 
 | Model | High-freq company AUC | Low-freq company AUC | High-freq N | Low-freq N |
 |-------|----------------------|---------------------|-------------|------------|
-| M2_no_dp | 0.52 | 0.54 | 11528 | 4472 |
-| loose_dp | 0.60 | 0.24 | 11528 | 4472 |
-| moderate_dp | 0.60 | 0.24 | 11528 | 4472 |
-| strict_dp | 0.61 | 0.24 | 11528 | 4472 |
-| strict_dp_tuned_clip | 0.61 | 0.24 | 11528 | 4472 |
+| M2_no_dp | N/A | N/A | N/A | N/A |
+| loose_dp | 0.61 | 0.21 | 11528 | 4472 |
+| moderate_dp | 0.61 | 0.21 | 11528 | 4472 |
+| strict_dp | 0.60 | 0.21 | 11528 | 4472 |
 
-**Interpretation:** The non-DP model shows MIA AUC of 0.53, indicating moderate memorization of training data. DP training reduces MIA AUC to 0.49, approaching random guess (0.50).
+**Interpretation:** The non-DP model shows MIA AUC of 0.52, indicating moderate memorization of training data. DP training reduces MIA AUC to 0.48, approaching random guess (0.50).
 
 ## Limitations & Risks
 

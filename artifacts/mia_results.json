@@ -3,81 +3,59 @@
     {
       "model": "M2_no_dp",
       "epsilon": "inf",
-      "mia_auc": 0.5253,
+      "mia_auc": 0.5175,
       "member_sample_size": 2000,
       "non_member_sample_size": 2000,
-      "train_loss_mean": 0.3916,
-      "test_loss_mean": 0.5245,
-      "loss_gap": 0.1328,
-      "stratified": {
-        "high_freq_count": 11528,
-        "low_freq_count": 4472,
-        "high_freq_company_auc": 0.5219,
-        "low_freq_company_auc": 0.5447
-      }
+      "train_loss_mean": 0.0,
+      "test_loss_mean": 0.0,
+      "loss_gap": 0.1397
     },
     {
       "model": "loose_dp",
       "epsilon": "50.0",
-      "mia_auc": 0.4913,
+      "mia_auc": 0.482,
       "member_sample_size": 2000,
       "non_member_sample_size": 2000,
-      "train_loss_mean": 1.415,
-      "test_loss_mean": 1.3363,
-      "loss_gap": -0.0786,
+      "train_loss_mean": 1.2292,
+      "test_loss_mean": 1.1493,
+      "loss_gap": -0.0799,
       "stratified": {
         "high_freq_count": 11528,
         "low_freq_count": 4472,
-        "high_freq_company_auc": 0.6044,
-        "low_freq_company_auc": 0.2417
+        "high_freq_company_auc": 0.6105,
+        "low_freq_company_auc": 0.215
       }
     },
     {
       "model": "moderate_dp",
       "epsilon": "8.0",
-      "mia_auc": 0.4914,
+      "mia_auc": 0.489,
       "member_sample_size": 2000,
       "non_member_sample_size": 2000,
-      "train_loss_mean": 1.3788,
-      "test_loss_mean": 1.3078,
-      "loss_gap": -0.071,
+      "train_loss_mean": 1.2859,
+      "test_loss_mean": 1.2248,
+      "loss_gap": -0.0611,
       "stratified": {
         "high_freq_count": 11528,
         "low_freq_count": 4472,
-        "high_freq_company_auc": 0.6049,
-        "low_freq_company_auc": 0.2399
+        "high_freq_company_auc": 0.6116,
+        "low_freq_company_auc": 0.2132
       }
     },
     {
       "model": "strict_dp",
       "epsilon": "1.0",
-      "mia_auc": 0.4918,
+      "mia_auc": 0.4853,
       "member_sample_size": 2000,
       "non_member_sample_size": 2000,
-      "train_loss_mean": 1.3327,
-      "test_loss_mean": 1.2764,
-      "loss_gap": -0.0563,
+      "train_loss_mean": 1.2556,
+      "test_loss_mean": 1.1669,
+      "loss_gap": -0.0888,
       "stratified": {
         "high_freq_count": 11528,
         "low_freq_count": 4472,
-        "high_freq_company_auc": 0.606,
-        "low_freq_company_auc": 0.2365
-      }
-    },
-    {
-      "model": "strict_dp_tuned_clip",
-      "epsilon": "1.0",
-      "mia_auc": 0.4921,
-      "member_sample_size": 2000,
-      "non_member_sample_size": 2000,
-      "train_loss_mean": 1.3752,
-      "test_loss_mean": 1.3081,
-      "loss_gap": -0.0672,
-      "stratified": {
-        "high_freq_count": 11528,
-        "low_freq_count": 4472,
-        "high_freq_company_auc": 0.6061,
-        "low_freq_company_auc": 0.2369
+        "high_freq_company_auc": 0.5995,
+        "low_freq_company_auc": 0.2127
       }
     }
   ]

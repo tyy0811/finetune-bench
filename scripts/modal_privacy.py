@@ -1,6 +1,6 @@
-"""Modal GPU app for DP-SGD training and membership inference.
+"""Modal GPU app for vmap DP-SGD training and membership inference.
 
-Separate from scripts/modal_run.py to isolate the Opacus dependency.
+Uses manual DP-SGD via torch.func.vmap with per-group gradient clipping.
 
 Usage:
     modal run scripts/modal_privacy.py --dp-train    # DP-SGD training (12 runs)
@@ -18,7 +18,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 
 app = modal.App("finetune-bench-privacy")
 
-# Separate image with Opacus — does not affect the main finetune-bench image.
+# Separate image with Opacus (for RDP accounting) — does not affect the main finetune-bench image.
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install(
@@ -30,6 +30,7 @@ image = (
         "mlflow==3.10.1",
         "pydantic==2.12.5",
         "opacus==1.4.1",
+        "peft>=0.7",
         "requests==2.32.5",
     )
     .add_local_dir(
@@ -45,12 +46,15 @@ image = (
 
 vol = modal.Volume.from_name("finetune-bench-privacy-data", create_if_missing=True)
 
-# Experiment matrix: 4 DP configs x 3 seeds = 12 runs
+# Experiment matrix: 3 DP configs x 3 seeds = 9 runs
+# vmap DP-SGD with per-group clipping, Adam optimizer, lr=1e-3, 40 epochs
 DP_CONFIGS = [
-    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5, "max_grad_norm": 1.0},
-    {"name": "strict_dp_tuned_clip", "epsilon": 1.0, "delta": 1e-5, "max_grad_norm": 0.5},
+    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
+    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
+    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
 ]
 SEEDS = [42, 123, 456]
 
@@ -118,7 +122,7 @@ def _build_datasets(splits, config):
 def _flatten_complaint_dataset(dataset):
     """Convert a ComplaintDataset (dict batches) to a flat TensorDataset.
 
-    Opacus requires forward(tensor) signatures. This pre-extracts
+    vmap DP-SGD needs flat tensor batches (not dicts). This pre-extracts
     input_ids, attention_mask, tabular, and labels into flat tensors.
     """
     import torch
@@ -130,44 +134,24 @@ def _flatten_complaint_dataset(dataset):
     return torch.utils.data.TensorDataset(input_ids, attention_mask, tabular, labels)
 
 
-@app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
+@app.function(gpu="T4", timeout=86400, image=image, volumes={"/data": vol})
 def train_dp_model(config: dict, seed: int) -> dict:
-    """Train DistilBERT with Opacus DP-SGD on Modal GPU."""
+    """Train DistilBERT+LoRA with vmap DP-SGD and per-group clipping."""
     _setup_remote()
 
     import torch
-    import torch.nn as nn
+    from peft import LoraConfig, get_peft_model
+    from transformers import DistilBertModel
 
     from adapters.cfpb import CFPBAdapter
     from models.fusion_model import MultimodalClassifier
-    from privacy.dp_training import train_dp
+    from privacy.vmap_dp import train_dp_vmap
     from training.config import TrainConfig
-
-    class _OpacusMultimodalWrapper(nn.Module):
-        """Flat-tensor forward signature for Opacus compatibility."""
-
-        def __init__(self, inner):
-            super().__init__()
-            self.inner = inner
-            # Freeze DistilBERT — Opacus 1.4 cannot compute per-sample
-            # gradients through transformer attention/LayerNorm
-            for p in self.inner.text_encoder.parameters():
-                p.requires_grad = False
-
-        def forward(self, input_ids, attention_mask, tabular):
-            text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
-            return self.inner(text_inputs, tabular)
 
     adapter = CFPBAdapter(sample_size=20_000, seed=seed)
     splits = adapter.preprocess()
-
     train_config = TrainConfig(
-        variant="M2",
-        seed=seed,
-        use_amp=False,
-        grad_accumulation_steps=1,
-        lr_encoder=2e-5,
-        lr_head=2e-5,  # single LR for DP
+        variant="M2", seed=seed, use_amp=False,
         run_name=f"dp_{config['name']}_seed{seed}",
     )
 
@@ -175,43 +159,101 @@ def train_dp_model(config: dict, seed: int) -> dict:
     num_classes = len(adapter.class_names)
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    # Flatten datasets for Opacus compatibility (needs tensor inputs, not dicts)
     flat_train = _flatten_complaint_dataset(train_ds)
     flat_val = _flatten_complaint_dataset(val_ds)
 
-    def make_model():
-        inner = MultimodalClassifier(
-            num_classes=num_classes,
-            tabular_input_dim=tabular_dim,
-            tabular_hidden_dim=train_config.tabular_hidden_dim,
-            tabular_embed_dim=train_config.tabular_embed_dim,
-            fusion_hidden_dim=train_config.fusion_hidden_dim,
-            dropout=train_config.dropout,
-            text_model_name=train_config.text_model_name,
-        )
-        return _OpacusMultimodalWrapper(inner)
+    lora_rank = config.get("lora_rank", 8)
 
-    result = train_dp(
-        model_class=make_model,
-        model_args=(),
-        train_dataset=flat_train,
-        val_dataset=flat_val,
+    # Build model: eager attention (required for vmap) + LoRA
+    encoder = DistilBertModel.from_pretrained(
+        train_config.text_model_name, attn_implementation="eager",
+    )
+    model = MultimodalClassifier(
         num_classes=num_classes,
-        epochs=train_config.num_epochs,
-        batch_size=train_config.batch_size,
-        lr=2e-5,
-        epsilon=config["epsilon"],
-        delta=config["delta"],
-        max_grad_norm=config["max_grad_norm"],
+        tabular_input_dim=tabular_dim,
+        tabular_hidden_dim=train_config.tabular_hidden_dim,
+        tabular_embed_dim=train_config.tabular_embed_dim,
+        fusion_hidden_dim=train_config.fusion_hidden_dim,
+        dropout=train_config.dropout,
+        text_encoder=encoder,
+    )
+    lora_config = LoraConfig(
+        r=lora_rank, lora_alpha=lora_rank * 2,
+        lora_dropout=0.0,  # must be 0 for vmap (no data-dependent control flow)
+        target_modules=["q_lin", "v_lin"], bias="none",
+    )
+    model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+
+    # Freeze base encoder, train LoRA + head
+    for name, param in model.named_parameters():
+        is_lora = "lora_" in name
+        is_head = any(x in name for x in ["tabular_mlp", "fusion_head"])
+        param.requires_grad = is_lora or is_head
+
+    # Per-group clipping config
+    lora_names = [n for n, p in model.named_parameters() if "lora_" in n and p.requires_grad]
+    head_names = [n for n, p in model.named_parameters()
+                  if any(x in n for x in ["tabular_mlp", "fusion_head"]) and p.requires_grad]
+    groups = {
+        "lora": {"params": lora_names, "clip_norm": config.get("lora_clip", 0.1)},
+        "head": {"params": head_names, "clip_norm": config.get("head_clip", 1.0)},
+    }
+
+    # Class weights for imbalanced data
+    all_labels = [int(flat_train[i][-1]) for i in range(len(flat_train))]
+    class_weights = torch.tensor(
+        [len(all_labels) / (num_classes * max(all_labels.count(c), 1)) for c in range(num_classes)],
+        dtype=torch.float32,
+    )
+
+    # Loss function for vmap (per-sample signature)
+    def loss_fn(trainable, frozen, bufs, input_ids, attention_mask, tabular, label):
+        all_p = {**frozen, **trainable}
+        out = torch.func.functional_call(
+            model, (all_p, bufs), args=(),
+            kwargs={
+                "text_inputs": {
+                    "input_ids": input_ids.unsqueeze(0),
+                    "attention_mask": attention_mask.unsqueeze(0),
+                },
+                "tabular_features": tabular.unsqueeze(0),
+            },
+        )
+        return torch.nn.functional.cross_entropy(
+            out, label.unsqueeze(0), weight=class_weights.to(out.device),
+        )
+
+    # Predict function for evaluation (batch-level, dict inputs)
+    def predict_fn(m, input_ids, attention_mask, tabular):
+        return m(
+            {"input_ids": input_ids, "attention_mask": attention_mask},
+            tabular,
+        )
+
+    ckpt_dir = f"/data/checkpoints/{config['name']}_seed{seed}"
+
+    result = train_dp_vmap(
+        model=model, loss_fn=loss_fn,
+        train_dataset=flat_train, val_dataset=flat_val,
+        groups=groups, num_classes=num_classes,
+        epochs=config.get("epochs", 10),
+        batch_size=config.get("batch_size", 16),
+        lr=config.get("lr", 2e-5),
+        epsilon=config["epsilon"], delta=config["delta"],
         device="cuda" if torch.cuda.is_available() else "cpu",
-        seed=seed,
+        seed=seed, class_weights=class_weights,
+        predict_fn=predict_fn,
+        optimizer_type=config.get("optimizer", "sgd"),
+        checkpoint_dir=ckpt_dir,
+        on_epoch_end=lambda: vol.commit(),
     )
 
     result["config_name"] = config["name"]
     result["seed"] = seed
+    result["lora_rank"] = lora_rank
 
-    # Save trained model state to volume for MIA
-    checkpoint_name = f"M2_dp_{config['name']}_seed{seed}_best.pt"
+    # Save checkpoint for MIA (rank in filename to prevent collisions)
+    checkpoint_name = f"M2_dp_{config['name']}_r{lora_rank}_seed{seed}_best.pt"
     vol_path = f"/data/{checkpoint_name}"
     model_state = result.pop("model_state_dict")
     torch.save(model_state, vol_path)
@@ -224,11 +266,13 @@ def train_dp_model(config: dict, seed: int) -> dict:
 @app.function(gpu="T4", timeout=1800, image=image, volumes={"/data": vol})
 def run_membership_inference_attack(
     checkpoint_path: str, epsilon_label: str, config_name: str,
+    lora_rank: int = 8,
 ) -> dict:
     """Run loss-threshold MIA on a trained model."""
     _setup_remote()
 
     import torch
+    from peft import LoraConfig, get_peft_model
 
     from adapters.cfpb import CFPBAdapter
     from models.fusion_model import MultimodalClassifier
@@ -249,17 +293,21 @@ def run_membership_inference_attack(
     num_classes = len(adapter.class_names)
     tabular_dim = splits["train"]["tabular_features"].shape[1]
 
-    # Rebuild model and load checkpoint.
-    # Checkpoints are saved from _OpacusMultimodalWrapper, so keys have
-    # an "inner." prefix. Strip it to load into bare MultimodalClassifier.
+    # Rebuild model with LoRA to match checkpoint's state_dict keys.
+    # vmap checkpoints are saved directly from MultimodalClassifier (no wrapper prefix).
     model = MultimodalClassifier(
         num_classes=num_classes,
         tabular_input_dim=tabular_dim,
         text_model_name=train_config.text_model_name,
     )
+    lora_config = LoraConfig(
+        r=lora_rank, lora_alpha=lora_rank * 2, lora_dropout=0.0,
+        target_modules=["q_lin", "v_lin"], bias="none",
+    )
+    model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+
     state_dict = torch.load(f"/data/{checkpoint_path}", map_location="cpu")
-    stripped = {k.removeprefix("inner."): v for k, v in state_dict.items()}
-    model.load_state_dict(stripped)
+    model.load_state_dict(state_dict)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Compute per-sample losses on train (members) and test (non-members)
@@ -400,6 +448,97 @@ def train_and_attack_baseline() -> dict:
     }
 
 
+@app.function(gpu="T4", timeout=3600, image=image, volumes={"/data": vol})
+def train_lora_baseline(seed: int) -> dict:
+    """Train LoRA model WITHOUT DP-SGD to establish the LoRA utility ceiling."""
+    _setup_remote()
+
+    import torch
+    import torch.nn as nn
+    from peft import LoraConfig, get_peft_model
+
+    from adapters.cfpb import CFPBAdapter
+    from evaluation.metrics import compute_metrics
+    from models.fusion_model import MultimodalClassifier
+    from training.config import TrainConfig
+    from training.train import compute_class_weights
+
+    adapter = CFPBAdapter(sample_size=20_000, seed=seed)
+    splits = adapter.preprocess()
+    train_config = TrainConfig(variant="M2", seed=seed, num_epochs=3)
+    train_ds, val_ds = _build_datasets(splits, train_config)
+    num_classes = len(adapter.class_names)
+    tabular_dim = splits["train"]["tabular_features"].shape[1]
+
+    flat_train = _flatten_complaint_dataset(train_ds)
+    flat_val = _flatten_complaint_dataset(val_ds)
+
+    model = MultimodalClassifier(
+        num_classes=num_classes, tabular_input_dim=tabular_dim,
+        text_model_name=train_config.text_model_name,
+    )
+    lora_config = LoraConfig(
+        r=8, lora_alpha=16, lora_dropout=0.1,
+        target_modules=["q_lin", "v_lin"], bias="none",
+    )
+    model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+
+    for name, param in model.named_parameters():
+        is_lora = "lora_" in name
+        is_head = any(x in name for x in ["tabular_mlp", "fusion_head"])
+        param.requires_grad = is_lora or is_head
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model.to(device)
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], lr=2e-5,
+    )
+    train_loader = torch.utils.data.DataLoader(flat_train, batch_size=16, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(flat_val, batch_size=32)
+
+    all_labels = [int(flat_train[i][-1]) for i in range(len(flat_train))]
+    class_weights = compute_class_weights(all_labels, num_classes).to(device)
+
+    for _epoch in range(train_config.num_epochs):
+        model.train()
+        for batch in train_loader:
+            ids, mask, tab, labels = [t.to(device) for t in batch]
+            logits = model({"input_ids": ids, "attention_mask": mask}, tab)
+            loss = nn.functional.cross_entropy(logits, labels, weight=class_weights)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    model.eval()
+    all_preds, all_labels = [], []
+    with torch.no_grad():
+        for batch in val_loader:
+            ids, mask, tab, labels = [t.to(device) for t in batch]
+            logits = model({"input_ids": ids, "attention_mask": mask}, tab)
+            all_preds.extend(logits.argmax(dim=1).cpu().tolist())
+            all_labels.extend(labels.cpu().tolist())
+
+    class_names = [str(i) for i in range(num_classes)]
+    metrics = compute_metrics(all_labels, all_preds, class_names)
+
+    # Save warm-start checkpoint to volume for DP stage 2
+    checkpoint_name = f"lora_warmstart_seed{seed}.pt"
+    torch.save(model.state_dict(), f"/data/{checkpoint_name}")
+    vol.commit()
+    print(f"Warm-start checkpoint saved: {checkpoint_name}")
+
+    return {
+        "config_name": "lora_baseline",
+        "seed": seed,
+        "val_macro_f1": metrics.macro_f1,
+        "epsilon_target": float("inf"),
+        "epsilon_actual": float("inf"),
+        "lora_rank": 8,
+        "trainable_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        "checkpoint_path": checkpoint_name,
+    }
+
+
 @app.local_entrypoint()
 def main(
     dp_train: bool = False,
@@ -407,18 +546,95 @@ def main(
     all: bool = False,
     test: bool = False,
     baseline_mia: bool = False,
+    lora_baseline: bool = False,
+    diag: bool = False,
 ):
     """CLI entrypoint for Modal privacy experiments."""
     artifacts = Path(_REPO_ROOT) / "artifacts"
     artifacts.mkdir(exist_ok=True)
 
     if test:
-        print("Running single validation run (moderate_dp, seed=42, T4)...")
-        result = train_dp_model.remote(
-            {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5, "max_grad_norm": 1.0},
-            42,
-        )
-        print(json.dumps({k: v for k, v in result.items() if k != "model_state_dict"}, indent=2))
+        print("Running 3 diagnostic configs in parallel (seed=42, T4)...")
+        _prewarm_data.remote()
+        diag_configs = [
+            # Final round: 40 epochs, find ceiling and separation
+            ({"name": "e50_adam_40ep", "epsilon": 50.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e8_adam_40ep", "epsilon": 8.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e1_adam_40ep", "epsilon": 1.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
+        ]
+        results = list(train_dp_model.starmap(diag_configs))
+        print("\n=== DIAGNOSTIC RESULTS ===")
+        for r in results:
+            print("{:<25} F1={:.4f}  acc={:.4f}  loss={:.4f}  eps={:.2f}  per_class_f1={}".format(
+                r["config_name"], r["val_macro_f1"], r["val_accuracy"],
+                r["train_loss"], r["epsilon_actual"],
+                [round(x, 3) for x in r["per_class_f1"]],
+            ))
+        return
+
+    if diag:
+        print("Running 4 diagnostic configs in parallel (seed=42, T4)...")
+        _prewarm_data.remote()
+        # Stage 1: warm-start (non-DP LoRA+head training, saves checkpoint)
+        print("Stage 1: warm-start training...")
+        ws_result = train_lora_baseline.remote(42)
+        ws_checkpoint = ws_result["checkpoint_path"]
+        print(f"  Warm-start F1={ws_result['val_macro_f1']:.4f}, checkpoint={ws_checkpoint}")
+
+        # Critical test: does LoRA contribute, or is the frozen head doing everything?
+        # "reset_lora" loads warm-start but re-randomizes LoRA weights before DP training
+        diag_configs = [
+            ({"name": "diag_ws_e8", "epsilon": 8.0, "delta": 1e-5,
+              "max_grad_norm": 1.0, "lora_rank": 8, "batch_size": 128, "epochs": 3,
+              "warmstart": ws_checkpoint}, 42),
+            ({"name": "diag_ws_e8_reset_lora", "epsilon": 8.0, "delta": 1e-5,
+              "max_grad_norm": 1.0, "lora_rank": 8, "batch_size": 128, "epochs": 3,
+              "warmstart": ws_checkpoint, "reset_lora": True}, 42),
+            ({"name": "diag_head_only_no_dp", "epsilon": 10000.0, "delta": 1e-5,
+              "max_grad_norm": 1.0, "lora_rank": 8, "batch_size": 128, "epochs": 1,
+              "warmstart": ws_checkpoint, "reset_lora": True}, 42),
+        ]
+        results = list(train_dp_model.starmap(diag_configs))
+        print("\n=== DIAGNOSTIC RESULTS ===")
+        for r in results:
+            print("{:<30} F1={:.4f}  acc={:.4f}  loss={:.4f}  eps={:.2f}  warmstart={}".format(
+                r["config_name"], r["val_macro_f1"], r["val_accuracy"],
+                r["train_loss"], r["epsilon_actual"], r.get("warmstart", "none"),
+            ))
+        return
+
+    if lora_baseline:
+        print("Training non-DP LoRA baselines (3 seeds)...")
+        _prewarm_data.remote()
+        results = list(train_lora_baseline.starmap([(s,) for s in SEEDS]))
+        import numpy as np
+        f1s = [r["val_macro_f1"] for r in results]
+        summary = {
+            "config": "lora_baseline",
+            "epsilon_target": "inf",
+            "epsilon_actual": "inf",
+            "val_macro_f1": round(float(np.mean(f1s)), 4),
+            "val_macro_f1_std": round(float(np.std(f1s)), 4),
+            "lora_rank": 8,
+            "seeds": SEEDS,
+        }
+        print(json.dumps(summary, indent=2))
+
+        # Merge into dp_results.json as the first entry
+        dp_path = artifacts / "dp_results.json"
+        if dp_path.exists():
+            dp_data = json.loads(dp_path.read_text())
+            dp_data["results"] = [
+                r for r in dp_data["results"] if r["config"] != "lora_baseline"
+            ]
+            dp_data["results"].insert(0, summary)
+        else:
+            dp_data = {"results": [summary]}
+        dp_path.write_text(json.dumps(dp_data, indent=2))
+        print(f"LoRA baseline merged into {dp_path}")
         return
 
     if baseline_mia:
@@ -448,12 +664,14 @@ def main(
         _prewarm_data.remote()
 
     if dp_train or all:
-        print(f"Dispatching {len(DP_CONFIGS) * len(SEEDS)} DP training runs...")
+        # vmap DP-SGD with per-group clipping, Adam, 40 epochs
         configs = [
             (config, seed)
             for config in DP_CONFIGS
             for seed in SEEDS
         ]
+
+        print(f"Dispatching {len(configs)} DP training runs...")
         results = list(train_dp_model.starmap(configs))
 
         aggregated = _aggregate_dp_results(results)
@@ -472,19 +690,27 @@ def main(
             print("No dp_results.json found — run --dp-train first")
             return
 
-        mia_args = []
-        for r in dp_data["results"]:
-            config_name = r["config"]
-            checkpoint = f"M2_dp_{config_name}_seed42_best.pt"
-            epsilon = r["epsilon_target"]
-            mia_args.append((checkpoint, str(epsilon), config_name))
-
+        mia_args = build_mia_args(dp_data)
         mia_results = list(run_membership_inference_attack.starmap(mia_args))
 
         mia_output = {"results": mia_results}
         mia_path = artifacts / "mia_results.json"
         mia_path.write_text(json.dumps(mia_output, indent=2))
         print(f"MIA results written to {mia_path}")
+
+
+def build_mia_args(dp_data: dict) -> list[tuple]:
+    """Build MIA attack args from dp_results, skipping entries without checkpoints."""
+    mia_args = []
+    for r in dp_data["results"]:
+        config_name = r["config"]
+        if config_name == "lora_baseline":
+            continue  # no checkpoint saved for non-DP baseline
+        lora_rank = r.get("lora_rank", 8)
+        checkpoint = f"M2_dp_{config_name}_r{lora_rank}_seed42_best.pt"
+        epsilon = r["epsilon_target"]
+        mia_args.append((checkpoint, str(epsilon), config_name, lora_rank))
+    return mia_args
 
 
 def _aggregate_dp_results(results: list[dict]) -> dict:
@@ -508,6 +734,7 @@ def _aggregate_dp_results(results: list[dict]) -> dict:
             ),
             "val_macro_f1": round(float(np.mean(f1s)), 4),
             "val_macro_f1_std": round(float(np.std(f1s)), 4),
+            "lora_rank": runs[0].get("lora_rank", 8),
             "seeds": [r["seed"] for r in runs],
         })
 

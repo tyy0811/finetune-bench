@@ -33,54 +33,102 @@ name, total VRAM, and utilization percentage — shows engineering maturity.
 Inflating the benefit would be caught by any reviewer who understands the
 relationship between model size and precision scaling.
 
+## Why inverse-frequency class weights over resampling
+
+CFPB product categories are heavily imbalanced (Debt collection dominates, Payday loan is rare). Inverse-frequency weights (`total / (num_classes × count_i)`) applied to `cross_entropy` give rare classes proportionally larger gradient signal without altering the training data distribution. The alternative — oversampling minority classes — would duplicate narratives and risk overfitting on rare-class phrasing. Weights are computed once from training labels and held constant; no dynamic curriculum.
+
+## Why these corruption types and rates
+
+The five corruptions test distinct failure modes a deployed model would face:
+
+- **Typo injection** (10%, 20%): Simulates real-world OCR errors and user typos. Character-level operations (swap, delete, insert) with space protection. Two rates bracket mild vs severe degradation.
+- **Token dropout** (20%, 40%): Tests positional dependence — whether the model relies on specific tokens or learns distributed representations. Special tokens ([CLS], [SEP]) are protected.
+- **Truncation** (32 tokens): Simulates short-form input or API token limits. 32 tokens is aggressive — well below DistilBERT's 512 max — to surface hard degradation.
+- **Tabular dropout** (50%): Tests graceful degradation when metadata is partially missing, common in production when upstream pipelines fail.
+- **Tabular ablation** (100%): Measures how much the fusion head depends on metadata signal vs learning to ignore it.
+
+Rates were chosen to produce a degradation spectrum — mild enough to be realistic at the low end, severe enough to differentiate architectures at the high end.
+
+## Why exclusive modality dropout over independent
+
+Modality dropout in M3 uses a single random draw per forward pass: 10% chance of zeroing the text branch, 10% chance of zeroing the tabular branch, 80% chance both survive. Independent dropout with the same per-branch rates would zero both modalities 1% of the time, producing a zero-information forward pass with no useful gradient. Exclusive dropout guarantees at least one modality is always active, forcing the model to learn complementary representations without wasting training steps on uninformative passes.
+
+## Why macro-F1 as primary metric with 3-seed evaluation
+
+Macro-F1 weights all classes equally regardless of prevalence, making it sensitive to performance on rare classes like Payday loan (which LightGBM scores 0.00 on). Accuracy alone would be misleading — a model predicting only Debt collection and Credit reporting could achieve >60% accuracy. Three seeds (42, 123, 456) provide mean and standard deviation to separate genuine architectural differences from initialization noise. The observed standard deviations (0.005–0.008) confirm that the +3.2pp fusion gain is well outside noise.
+
+## Why the DatasetAdapter abstraction
+
+The `DatasetAdapter` base class (`adapters/base.py`) defines a contract: `load_raw()` returns a DataFrame, `preprocess()` returns train/val/test splits with narratives, tabular features, labels, and company metadata. The CFPB adapter handles product merging, rare-class consolidation, leakage-safe feature encoding (top-50 companies, states, channels derived from training split only), and stratified splitting. A new dataset requires only implementing these two methods — the training loop, evaluation, and robustness pipeline are dataset-agnostic. This separates data engineering decisions from modeling decisions.
+
 ---
 
-## Design Decision #4: AMP and gradient accumulation disabled for DP-SGD runs
+## Why AMP and gradient accumulation are disabled for DP-SGD runs
 
 DP-SGD adds calibrated noise to per-sample gradients. AMP's dynamic loss scaling modifies gradient magnitudes in ways that interact unpredictably with Opacus's noise calibration and clipping. Disabling AMP for DP runs ensures the privacy accounting is correct — the epsilon value reported actually corresponds to the formal privacy guarantee. The ~2x training slowdown from disabling AMP is irrelevant on Modal A10G where each config completes in under an hour.
 
 Gradient accumulation is also disabled because Opacus has its own `virtual_step_size` mechanism that is incompatible with manual accumulation.
 
-## Design Decision #5: Single learning rate for DP runs
+## Why single learning rate for DP runs
 
 The baseline uses differential learning rates (2e-5 encoder, 1e-3 head). Opacus's `PrivacyEngine` wraps the optimizer and may flatten param groups. Rather than adding compatibility shims, DP runs use a single 2e-5 learning rate. This is one more controlled variable between DP and non-DP runs — the experiment matrix documents what varies.
 
-## Design Decision #6: Loss-threshold MIA over shadow models
+## Why loss-threshold MIA over shadow models
 
 The loss-threshold attack is the simplest credible membership inference method: it requires only the trained model, no shadow models, no trained attack classifier. For this dataset size (20K samples) and purpose (empirical memorization measurement, not adversarial ML research), loss-threshold is sufficient. Shadow models would add significant compute cost and code complexity without changing the conclusion.
 
-## Design Decision #7: Balanced subsampling for MIA AUC validity
+## Why balanced subsampling for MIA AUC validity
 
 Unbalanced member/non-member sets inflate AUC in a way that's hard to compare across studies. We subsample training members to match the test set size, producing a 50/50 evaluation set. Both the subsample size and AUC are reported.
 
-## Design Decision #8: Exact normalized deduplication over MinHash
+## Why exact normalized deduplication over MinHash
 
 CFPB complaint narratives are short enough that near-duplicates are almost always exact duplicates with minor formatting differences. Exact match on normalized text (lowercased, whitespace-collapsed, punctuation-stripped) catches these with zero new dependencies and deterministic results. If MinHash for fuzzy near-duplicates is needed later, it's a follow-up, not a prerequisite.
 
-## Design Decision #9: Separate Modal image for privacy workloads
+## Why separate Modal image for privacy workloads
 
 Opacus pulls specific PyTorch version constraints and its own build dependencies. `scripts/modal_privacy.py` uses a separate Modal app with its own image definition, keeping Opacus isolated from the main `scripts/modal_run.py` image. This prevents version contamination and build time increases for existing workloads.
 
-## Design Decision #10: Dual-scan data auditor (redaction markers + residual PII)
+## Why dual-scan data auditor over single PII scan
 
 CFPB already redacts PII in published complaint narratives (replacing with XXXX, XX/XX/XXXX). A PII scanner that only reports raw counts on pre-redacted data would be misleading — low counts could suggest a broken scanner rather than effective source-level redaction. The dual-scan reports both redaction markers (documenting source controls) and residual PII (documenting what slipped through). This produces a more technically honest audit and surfaces the actually interesting finding: source redaction is imperfect.
 
-## Design Decision #11: f-string template for model card, not Jinja2
+## Why f-string template for model card, not Jinja2
 
 The model card is ~200 lines of Markdown. A single `MODEL_CARD_TEMPLATE` constant with `{placeholders}` and one `.format()` call keeps the template readable and the data pipeline separate. Jinja2 would add a dependency for no gain at this complexity level. The template is a constant at the top of the file — easy to customize without touching data logic.
 
-## Design Decision #12: Model card sources from artifacts/ JSON, not MLflow
+## Why model card sources from artifacts/ JSON, not MLflow
 
 All model card inputs are serialized to `artifacts/` as JSON files (data audit, DP results, MIA results). The model card generator reads from one directory with no MLflow client dependency. MLflow is the source of truth during training; `artifacts/` is the source of truth for documentation. This decouples the documentation pipeline from the experiment tracking system.
 
-## Design Decision #13: Frozen DistilBERT encoder for DP-SGD training
+## Why manual DP-SGD via vmap with per-group clipping
 
-Opacus 1.4 cannot compute per-sample gradients through DistilBERT's multi-head attention and LayerNorm layers — the backward hooks produce inconsistent gradient shapes across parameters. Freezing the encoder and DP-training only the tabular MLP + fusion head (66K trainable params) is the standard workaround documented by the Opacus team for transformer architectures. The privacy guarantee applies to the trained parameters; the frozen encoder acts as a fixed feature extractor. This is a meaningful limitation: the DP model cannot adapt the text representations, so its utility ceiling is lower than the non-DP baseline which fine-tunes the full model.
+Seven approaches were attempted before arriving at the working solution. Each failure was diagnosed, not just observed.
 
-## Design Decision #14: T4 GPU over A10G for privacy workloads
+**Approach 1: Raw Opacus on full DistilBERT.** Failed. Opacus 1.4's `GradSampleModule` cannot compute per-sample gradients through DistilBERT's multi-head attention and embedding layers. All three `grad_sample_mode` options (`hooks`, `ew`, `functorch`) fail with incompatible gradient tensor shapes. Tested on both Opacus 1.4.1 and 1.5.4 — same failure.
+
+**Approach 2: dp-transformers (Microsoft).** Investigated and abandoned. The `convert_model_to_dp()` function referenced in the library's documentation does not exist in the released v1.0.0 package. The library provides only GPT-2 specific utilities (`convert_gpt2_attention_to_lora`, `force_causal_attention`). Additionally, dp-transformers 1.0.0 pins `torch<=1.12.1`, incompatible with our torch 2.2.2 stack.
+
+**Approach 3: Frozen encoder + DP on head only (66K params).** Implemented and tested. F1 collapsed to 0.08 (random chance for 10 classes) across all epsilon values (1.0, 8.0, 50.0) with identical accuracy of 0.6685. The model learned to predict only the majority class. With only 66K trainable parameters, DP noise overwhelmed the gradient signal regardless of privacy budget.
+
+**Approach 4: Opacus + LoRA adapters + head from scratch (~370K params).** The peft library's LoRA adapters inject vanilla `nn.Linear` layers into DistilBERT's attention projections (`q_lin`, `v_lin`), which Opacus handles natively. Spike test confirmed Opacus could wrap the model and complete a training step. However, full training produced the same F1=0.08 collapse. Root cause: **gradient heterogeneity under global per-sample clipping**. The fusion head's per-sample gradient norms (~5.0) dominate the global L2 norm. Opacus clips to `max_grad_norm=1.0`, so the clip factor is ~0.2, scaling all gradients down 5×. LoRA gradients (already ~0.01) become ~0.002, while noise remains at ~0.003/param. LoRA SNR drops below 0.5 — the adapters receive random walks instead of gradient signal. Tested across ε={0.5, 1.0, 8.0, 50.0}, LoRA rank={8, 16}, batch_size={16, 128, 256, 512}, epochs={3, 5, 10}, max_grad_norm={0.01, 0.1, 1.0}. All configurations produced identical F1=0.08. Reducing max_grad_norm doesn't help because global clipping scales signal and noise proportionally — the SNR ratio is invariant to the clip norm.
+
+**Approach 5: Two-stage warm-start (non-DP head → DP LoRA fine-tune).** Trained LoRA + head without DP first (F1=0.54), then froze the head and DP-fine-tuned only the LoRA adapters. The DP stage preserved F1 (0.56 at ε=1.0, 0.56 at ε=50.0) — a flat curve. This is technically valid but meaningless: the head (which carries the classification signal) was trained without DP, so the privacy guarantee covers only the LoRA adapters, which the diagnostic showed contribute minimally. Resetting LoRA weights to random dropped F1 from 0.12 to 0.10 on the 2K test set — a real but small contribution. *(These warm-start diagnostics were run under the prior Opacus-based implementation; the `--diag` CLI path is vestigial and does not reproduce them.)*
+
+**Approach 6: Manual DP-SGD via `torch.func.vmap` with per-group clipping + SGD.** `vmap(grad(...))` computes per-sample gradients at the functional level, bypassing Opacus's `GradSampleModule` hooks entirely. This enables **per-group clipping**: LoRA parameters and head parameters are clipped with independent L2 norms (LoRA: C=0.1, head: C=1.0), with noise proportional to each group's clip norm. This directly solves the gradient heterogeneity problem — LoRA signal is not drowned by head gradient magnitude because they occupy separate clipping spaces. Requires `attn_implementation='eager'` for DistilBERT because the default SDPA path's `_prepare_4d_attention_mask_for_sdpa` contains `torch.all(mask == 1)` — data-dependent control flow that vmap cannot trace. vmap requires all operations to be deterministic across the batch dimension; a conditional that branches on input values violates this. Forcing eager attention uses standard matrix multiplication with explicit masking, which vmap handles natively. However, **F1 collapsed to 0.08 at every ε including ε=50** (where noise is negligible). Loss decreased slightly (2.30 → 2.28 over 10 epochs) confirming gradient flow, but the model only predicted the majority class. Root cause: per-group clipping bounds the total gradient L2 norm for each group, but that budget is shared across all parameters in the group. With ~66K head parameters sharing clip_norm=1.0, the per-parameter gradient is ~0.004, giving SGD per-step updates of ~8e-8 — effectively zero. Tested SGD at lr=2e-5, 1e-3, and 1e-1; Adam at lr=2e-5 with ε=8 (diverged). The ε=50 SGD failure was the critical diagnostic: it proved the problem was not DP noise but optimizer dynamics.
+
+**Approach 7 (current): vmap per-group clipping + Adam at lr=1e-3 + 40 epochs.** Adam's per-parameter adaptive learning rate normalizes the shared gradient budget, giving each parameter an effective step size of ~lr regardless of group clip norm. At lr=1e-3, Adam produces measurable learning by epoch 5 and a monotonic privacy-utility tradeoff by epoch 40: F1=0.30 (ε=50) → 0.27 (ε=8) → 0.21 (ε=1). The 40-epoch requirement (vs 3 for non-DP training) reflects the slower convergence when all gradient signal passes through per-sample clipping and noise addition. Opacus is used only for privacy accounting (`RDPAccountant` for budget tracking, `get_noise_multiplier` for noise calibration).
+
+**Privacy accounting with multiple groups:** Each training step releases *k* noised aggregates (one per parameter group), not one. Under RDP composition, the accountant must track all *k* mechanism invocations per step. The noise calibration therefore targets `epochs × k` total mechanism invocations so that the reported ε covers the full composed release. With k=2 (LoRA + head), this means roughly √2 more noise per group than a single-group mechanism at the same ε — the cost of per-group clipping's utility benefit.
+
+## Why T4 GPU over A10G for privacy workloads
 
 The DP-SGD training loop with a frozen encoder is dominated by the forward pass through DistilBERT (feature extraction only, no per-sample gradients on the encoder). This is compute-light enough for T4 (16 GB VRAM, ~8 TFLOPS) — each of the 12 runs completes in under 15 minutes. A10G (24 GB, ~31 TFLOPS) would be faster but costs ~3× more per hour. Since the runs parallelize via Modal starmap, wall-clock time is bounded by the slowest run regardless of GPU tier. T4 is the right cost-performance point for this workload.
 
-## Design Decision #15: Model cards as governance artifact
+## Why model cards as governance artifact
 
 Model cards (Mitchell et al. 2019) are the industry-standard documentation format for ML model governance and are increasingly referenced by the EU AI Act's transparency requirements. The model card auto-generates from JSON artifacts so it stays current with the training pipeline rather than becoming stale documentation. All 8 Mitchell et al. sections are populated: model details, intended use, training data, evaluation results, fairness analysis, privacy, limitations & risks, and deployment recommendations.
+
+## Why NER entities are reported but not used as a PII gate
+
+The data audit reports 114,758 NER entities (59,799 ORG, 36,527 PERSON, 18,365 GPE) but the PII gate only enforces on regex-detected residual PII (emails, phones, SSNs). NER entities in CFPB data are expected content, not PII leakage — company names, complainant roles, states, and cities are the actual features the model classifies on. Gating on ORG entities would block training on a complaint classification dataset where company identity is a primary signal. The NER scan exists for transparency: it documents what entity types are present so downstream consumers can make informed decisions. The regex gate exists for safety: it catches contact information that survived CFPB's source-level redaction. These are different concerns with different thresholds.

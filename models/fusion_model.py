@@ -27,10 +27,11 @@ class MultimodalClassifier(nn.Module):
         text_model_name: str = "distilbert-base-uncased",
         text_dropout_prob: float = 0.1,
         tabular_dropout_prob: float = 0.1,
+        text_encoder: DistilBertModel | None = None,
     ):
         super().__init__()
 
-        self.text_encoder = DistilBertModel.from_pretrained(text_model_name)
+        self.text_encoder = text_encoder if text_encoder is not None else DistilBertModel.from_pretrained(text_model_name)
         text_dim = self.text_encoder.config.dim  # 768
 
         self.tabular_mlp = nn.Sequential(
