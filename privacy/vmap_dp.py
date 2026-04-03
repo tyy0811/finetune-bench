@@ -151,7 +151,8 @@ def train_dp_vmap(
     torch.manual_seed(seed)
 
     if predict_fn is None:
-        predict_fn = lambda m, *args: m(*args)
+        def predict_fn(m, *args):
+            return m(*args)
 
     model = model.to(device)
     model.eval()  # disable dropout — vmap can't trace data-dependent dropout

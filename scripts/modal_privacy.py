@@ -140,7 +140,6 @@ def train_dp_model(config: dict, seed: int) -> dict:
     _setup_remote()
 
     import torch
-    import torch.nn as nn
     from peft import LoraConfig, get_peft_model
     from transformers import DistilBertModel
 
@@ -148,7 +147,6 @@ def train_dp_model(config: dict, seed: int) -> dict:
     from models.fusion_model import MultimodalClassifier
     from privacy.vmap_dp import train_dp_vmap
     from training.config import TrainConfig
-    from training.train import compute_class_weights
 
     adapter = CFPBAdapter(sample_size=20_000, seed=seed)
     splits = adapter.preprocess()
