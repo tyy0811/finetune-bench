@@ -237,9 +237,10 @@ Privacy infrastructure for the fine-tuning lifecycle: DP-SGD training with per-g
 
 | Config | Target ε | Actual ε | Macro-F1 |
 |--------|----------|----------|----------|
-| Loose DP | 50.0 | 50.00 | 0.2728 |
-| Moderate DP | 8.0 | 8.00 | 0.2454 |
-| Strict DP | 1.0 | 1.00 | 0.1879 |
+| LoRA baseline (no DP) | ∞ | — | 0.5412 ± 0.014 |
+| Loose DP | 50.0 | 50.00 | 0.3019 ± 0.015 |
+| Moderate DP | 8.0 | 8.00 | 0.2671 ± 0.012 |
+| Strict DP | 1.0 | 1.00 | 0.2078 ± 0.014 |
 
 *Manual DP-SGD via `torch.func.vmap` with per-group gradient clipping (LoRA: C=0.1, head: C=1.0) and Adam optimizer (lr=1e-3, 40 epochs). LoRA adapters (r=8) on DistilBERT attention + tabular MLP + fusion head trained under differential privacy. Seven approaches were tested before this solution — see [DECISIONS.md](DECISIONS.md) for the full diagnostic journey.*
 
@@ -249,12 +250,12 @@ Privacy infrastructure for the fine-tuning lifecycle: DP-SGD training with per-g
 
 | Model | ε | MIA AUC | Loss Gap | Interpretation |
 |-------|---|---------|----------|----------------|
-| M2 (no DP) | ∞ | 0.5253 | +0.13 | Slight memorization |
-| Loose DP | 50.0 | 0.4913 | -0.08 | Random guess |
-| Moderate DP | 8.0 | 0.4914 | -0.07 | Random guess |
-| Strict DP | 1.0 | 0.4918 | -0.06 | Random guess |
+| M2 (no DP) | ∞ | 0.5175 | +0.14 | Slight memorization |
+| Loose DP | 50.0 | 0.4820 | -0.08 | Random guess |
+| Moderate DP | 8.0 | 0.4890 | -0.06 | Random guess |
+| Strict DP | 1.0 | 0.4853 | -0.09 | Random guess |
 
-*Loss-threshold attack on 2000 balanced member/non-member samples.* The non-DP model shows minimal memorization (AUC 0.53), suggesting that CFPB's source-level redaction and the 20K dataset size limit memorization risk even without formal privacy guarantees. DP models show AUC ~0.49, confirming DP-SGD eliminates the residual signal.
+*Loss-threshold attack on 2000 balanced member/non-member samples.* The non-DP model shows minimal memorization (AUC 0.52), consistent with CFPB's source-level redaction and 20K dataset size limiting memorization risk. All DP models show AUC < 0.49, confirming DP-SGD eliminates the residual signal.
 
 ### Data Privacy Audit
 
