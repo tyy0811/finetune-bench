@@ -254,8 +254,8 @@ def train_dp_model(config: dict, seed: int) -> dict:
     result["seed"] = seed
     result["lora_rank"] = lora_rank
 
-    # Save checkpoint for MIA
-    checkpoint_name = f"M2_dp_{config['name']}_seed{seed}_best.pt"
+    # Save checkpoint for MIA (rank in filename to prevent collisions)
+    checkpoint_name = f"M2_dp_{config['name']}_r{lora_rank}_seed{seed}_best.pt"
     vol_path = f"/data/{checkpoint_name}"
     model_state = result.pop("model_state_dict")
     torch.save(model_state, vol_path)
@@ -708,9 +708,9 @@ def build_mia_args(dp_data: dict) -> list[tuple]:
         config_name = r["config"]
         if config_name == "lora_baseline":
             continue  # no checkpoint saved for non-DP baseline
-        checkpoint = f"M2_dp_{config_name}_seed42_best.pt"
-        epsilon = r["epsilon_target"]
         lora_rank = r.get("lora_rank", 8)
+        checkpoint = f"M2_dp_{config_name}_r{lora_rank}_seed42_best.pt"
+        epsilon = r["epsilon_target"]
         mia_args.append((checkpoint, str(epsilon), config_name, lora_rank))
     return mia_args
 

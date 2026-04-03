@@ -258,16 +258,15 @@ class TestTrainDpMultimodal:
         assert result["train_loss"] > 0
 
 
-class TestDpTransformersIntegration:
-    """Test full-model DP training with dp-transformers layer conversion."""
+class TestLoraIntegration:
+    """Test LoRA + Opacus DP-SGD on MultimodalClassifier."""
 
-    def test_convert_encoder_and_train(self):
-        """Full-model DP-SGD via dp-transformers produces valid results with budget consumed."""
+    def test_lora_dp_training_completes(self):
         pytest.importorskip("opacus")
-        pytest.importorskip("dp_transformers")
+        pytest.importorskip("peft")
 
-        from dp_transformers.module_modification import convert_model_to_dp
-        from transformers import DistilBertModel, DistilBertTokenizer
+        from peft import LoraConfig, get_peft_model
+        from transformers import DistilBertTokenizer
 
         from models.fusion_model import MultimodalClassifier
         from training.train import ComplaintDataset
@@ -303,27 +302,34 @@ class TestDpTransformersIntegration:
             val_ds.labels,
         )
 
-        # Approach B: convert encoder first, then inject into model
-        encoder = DistilBertModel.from_pretrained("distilbert-base-uncased")
-        encoder = convert_model_to_dp(encoder)
+        # Build model with LoRA — same approach as modal_privacy.py
+        model = MultimodalClassifier(
+            num_classes=num_classes,
+            tabular_input_dim=tabular_dim,
+            text_model_name="distilbert-base-uncased",
+        )
+        lora_config = LoraConfig(
+            r=8, lora_alpha=16, lora_dropout=0.1,
+            target_modules=["q_lin", "v_lin"], bias="none",
+        )
+        model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+
+        for name, param in model.named_parameters():
+            is_lora = "lora_" in name
+            is_head = any(x in name for x in ["tabular_mlp", "fusion_head"])
+            param.requires_grad = is_lora or is_head
 
         class OpacusWrapper(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, inner):
                 super().__init__()
-                self.inner = MultimodalClassifier(
-                    num_classes=num_classes,
-                    tabular_input_dim=tabular_dim,
-                    text_model_name="distilbert-base-uncased",
-                    text_encoder=encoder,
-                )
-                # No freeze — full model is DP-trainable
+                self.inner = inner
 
             def forward(self, input_ids, attention_mask, tabular):
                 text_inputs = {"input_ids": input_ids, "attention_mask": attention_mask}
                 return self.inner(text_inputs, tabular)
 
         result = train_dp(
-            model_class=OpacusWrapper,
+            model_class=lambda: OpacusWrapper(model),
             model_args=(),
             train_dataset=flat_train,
             val_dataset=flat_val,
@@ -340,3 +346,105 @@ class TestDpTransformersIntegration:
         assert result["epsilon_actual"] > 0
         assert "val_macro_f1" in result
         assert result["train_loss"] > 0
+        assert "model_state_dict" in result
+
+
+class TestMiaCheckpointFiltering:
+    """Verify build_mia_args() from modal_privacy.py skips lora_baseline
+    and passes lora_rank through for each DP config."""
+
+    @staticmethod
+    def _import_build_mia_args():
+        """Import build_mia_args, mocking modal which isn't installed locally."""
+        import sys
+        from unittest.mock import MagicMock
+
+        sentinel = "modal" not in sys.modules
+        if sentinel:
+            sys.modules["modal"] = MagicMock()
+        try:
+            from scripts.modal_privacy import build_mia_args
+            return build_mia_args
+        finally:
+            if sentinel:
+                del sys.modules["modal"]
+
+    def test_lora_baseline_excluded_from_mia_args(self):
+        """lora_baseline rows must not produce MIA checkpoint lookups."""
+        build_mia_args = self._import_build_mia_args()
+        dp_results = {"results": [
+            {"config": "lora_baseline", "epsilon_target": "inf",
+             "epsilon_actual": "inf", "val_macro_f1": 0.45, "lora_rank": 8},
+            {"config": "loose_dp", "epsilon_target": 50.0,
+             "epsilon_actual": 49.8, "val_macro_f1": 0.40, "lora_rank": 8},
+            {"config": "strict_dp", "epsilon_target": 1.0,
+             "epsilon_actual": 0.99, "val_macro_f1": 0.20, "lora_rank": 8},
+        ]}
+        args = build_mia_args(dp_results)
+        config_names = [a[2] for a in args]
+        assert "lora_baseline" not in config_names
+        assert len(args) == 2
+
+    def test_lora_rank_propagated_to_mia_args(self):
+        """Non-default lora_rank must propagate into MIA args tuple and checkpoint path."""
+        build_mia_args = self._import_build_mia_args()
+        dp_results = {"results": [
+            {"config": "loose_dp", "epsilon_target": 50.0,
+             "epsilon_actual": 49.8, "val_macro_f1": 0.40, "lora_rank": 4},
+        ]}
+        args = build_mia_args(dp_results)
+        assert args[0][3] == 4
+        # Checkpoint path must include rank to prevent collisions
+        assert "_r4_" in args[0][0], f"Checkpoint path missing rank: {args[0][0]}"
+
+    def test_lora_rank_defaults_to_8_when_missing(self):
+        """Older dp_results.json entries without lora_rank must default to 8."""
+        build_mia_args = self._import_build_mia_args()
+        dp_results = {"results": [
+            {"config": "moderate_dp", "epsilon_target": 8.0,
+             "epsilon_actual": 7.9, "val_macro_f1": 0.30},
+        ]}
+        args = build_mia_args(dp_results)
+        assert args[0][3] == 8
+        assert "_r8_" in args[0][0], f"Checkpoint path missing rank: {args[0][0]}"
+
+
+class TestLoraRankRoundTrip:
+    """Verify LoRA model state_dict round-trips correctly at non-default ranks."""
+
+    def test_nondefault_rank_save_load(self):
+        pytest.importorskip("peft")
+
+        from peft import LoraConfig, get_peft_model
+
+        from models.fusion_model import MultimodalClassifier
+
+        num_classes = 3
+        tabular_dim = 5
+        lora_rank = 4  # non-default
+
+        def make_lora_model(rank):
+            model = MultimodalClassifier(
+                num_classes=num_classes,
+                tabular_input_dim=tabular_dim,
+                text_model_name="distilbert-base-uncased",
+            )
+            lora_config = LoraConfig(
+                r=rank, lora_alpha=rank * 2, lora_dropout=0.1,
+                target_modules=["q_lin", "v_lin"], bias="none",
+            )
+            model.text_encoder = get_peft_model(model.text_encoder, lora_config)
+            return model
+
+        # Save state from rank=4 model
+        source = make_lora_model(lora_rank)
+        state_dict = source.state_dict()
+
+        # Load into a fresh rank=4 model — must succeed
+        target = make_lora_model(lora_rank)
+        target.load_state_dict(state_dict)  # would raise on shape mismatch
+
+        # Verify a rank=8 model rejects the rank=4 state
+        wrong_rank = make_lora_model(8)
+        with pytest.raises(RuntimeError):
+            wrong_rank.load_state_dict(state_dict)

@@ -34,34 +34,51 @@ def plot_privacy_utility_tradeoff():
 
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    # DP results
+    # Split DP results from LoRA baseline
     configs = dp_data["results"]
-    epsilons = [r["epsilon_actual"] for r in configs]
-    f1s = [r["val_macro_f1"] for r in configs]
-    stds = [r.get("val_macro_f1_std", 0) for r in configs]
-    labels = [r["config"] for r in configs]
+    dp_configs = [r for r in configs if r["config"] != "lora_baseline"]
+    lora_baseline = next((r for r in configs if r["config"] == "lora_baseline"), None)
 
+    # DP results
+    epsilons = [r["epsilon_actual"] for r in dp_configs]
+    f1s = [r["val_macro_f1"] for r in dp_configs]
+    stds = [r.get("val_macro_f1_std", 0) for r in dp_configs]
+    labels = [r["config"] for r in dp_configs]
+
+    ranks = sorted(set(r.get("lora_rank", 8) for r in dp_configs))
+    rank_label = f"r={ranks[0]}" if len(ranks) == 1 else f"r={ranks}"
     ax.errorbar(epsilons, f1s, yerr=stds, fmt="o-", color="#e74c3c",
-                capsize=5, linewidth=2, markersize=8, label="DP-SGD (full model)")
+                capsize=5, linewidth=2, markersize=8, label=f"DP-SGD (LoRA {rank_label})")
 
     for eps, f1, label in zip(epsilons, f1s, labels):
         ax.annotate(label, (eps, f1), textcoords="offset points",
                     xytext=(0, 12), ha="center", fontsize=8)
 
-    # Non-DP baseline as horizontal line
+    # LoRA baseline (no DP) as horizontal line
+    if lora_baseline:
+        lora_f1 = lora_baseline["val_macro_f1"]
+        lora_std = lora_baseline.get("val_macro_f1_std", 0)
+        ax.axhline(y=lora_f1, color="#3498db", linestyle=":", linewidth=2,
+                   label=f"LoRA baseline (no DP): {lora_f1:.4f}")
+        if lora_std:
+            ax.axhspan(lora_f1 - lora_std, lora_f1 + lora_std,
+                       alpha=0.1, color="#3498db")
+
+    # Non-DP full fine-tuning baseline as horizontal line
     if baseline_f1 is not None:
         ax.axhline(y=baseline_f1, color="#2ecc71", linestyle="--", linewidth=2,
-                   label=f"M2 baseline (no DP): {baseline_f1:.4f}")
+                   label=f"M2 full fine-tuning (no DP): {baseline_f1:.4f}")
         if baseline_std:
             ax.axhspan(baseline_f1 - baseline_std, baseline_f1 + baseline_std,
                        alpha=0.1, color="#2ecc71")
 
     ax.set_xlabel("Privacy Budget (ε)", fontsize=12)
     ax.set_ylabel("Macro-F1", fontsize=12)
-    ax.set_title("Privacy-Utility Tradeoff: DP-SGD via dp-transformers", fontsize=14)
+    ax.set_title("Privacy-Utility Tradeoff: DP-SGD via LoRA Adapters", fontsize=14)
     ax.legend(loc="center right", fontsize=10)
     ax.set_xscale("log")
-    ax.set_ylim(0, max(0.75, (baseline_f1 or 0.7) + 0.1))
+    all_f1s = f1s + ([lora_f1] if lora_baseline else []) + ([baseline_f1] if baseline_f1 else [])
+    ax.set_ylim(0, max(0.75, max(all_f1s) + 0.1) if all_f1s else 0.75)
     ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
