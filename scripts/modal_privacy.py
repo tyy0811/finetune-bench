@@ -46,13 +46,15 @@ image = (
 
 vol = modal.Volume.from_name("finetune-bench-privacy-data", create_if_missing=True)
 
-# Experiment matrix: 4 DP configs x 3 seeds = 12 runs
+# Experiment matrix: 3 DP configs x 3 seeds = 9 runs
+# vmap DP-SGD with per-group clipping, Adam optimizer, lr=1e-3, 40 epochs
 DP_CONFIGS = [
-    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5},
-    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5},
-    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5},
-    {"name": "strict_dp_tuned_clip", "epsilon": 1.0, "delta": 1e-5,
-     "lora_clip": 0.05, "head_clip": 0.5},
+    {"name": "loose_dp", "epsilon": 50.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
+    {"name": "moderate_dp", "epsilon": 8.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
+    {"name": "strict_dp", "epsilon": 1.0, "delta": 1e-5,
+     "optimizer": "adam", "lr": 1e-3, "epochs": 40},
 ]
 SEEDS = [42, 123, 456]
 
@@ -553,14 +555,13 @@ def main(
         print("Running 3 diagnostic configs in parallel (seed=42, T4)...")
         _prewarm_data.remote()
         diag_configs = [
-            # Round 3: find the ceiling and test the curve
-            # Stop criterion: F1 >= 0.30 at ε=50/10ep, else Path D
-            ({"name": "e50_adam_10ep", "epsilon": 50.0, "delta": 1e-5,
-              "epochs": 10, "optimizer": "adam", "lr": 1e-3}, 42),
-            ({"name": "e50_adam_20ep", "epsilon": 50.0, "delta": 1e-5,
-              "epochs": 20, "optimizer": "adam", "lr": 1e-3}, 42),
-            ({"name": "e8_adam_10ep", "epsilon": 8.0, "delta": 1e-5,
-              "epochs": 10, "optimizer": "adam", "lr": 1e-3}, 42),
+            # Final round: 40 epochs, find ceiling and separation
+            ({"name": "e50_adam_40ep", "epsilon": 50.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e8_adam_40ep", "epsilon": 8.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
+            ({"name": "e1_adam_40ep", "epsilon": 1.0, "delta": 1e-5,
+              "epochs": 40, "optimizer": "adam", "lr": 1e-3}, 42),
         ]
         results = list(train_dp_model.starmap(diag_configs))
         print("\n=== DIAGNOSTIC RESULTS ===")
@@ -661,19 +662,15 @@ def main(
         _prewarm_data.remote()
 
     if dp_train or all:
-        # Single-stage DP training: LoRA + head from scratch, encoder frozen.
+        # vmap DP-SGD with per-group clipping, Adam, 40 epochs
         configs = [
-            ({**config, "epochs": config.get("epochs", 10)}, seed)
+            (config, seed)
             for config in DP_CONFIGS
             for seed in SEEDS
         ]
 
-        print(f"Dispatching {len(configs)} DP training runs in 2 batches...")
-        mid = len(configs) // 2
-        print(f"  Batch 1: {mid} runs")
-        results = list(train_dp_model.starmap(configs[:mid]))
-        print(f"  Batch 2: {len(configs) - mid} runs")
-        results.extend(train_dp_model.starmap(configs[mid:]))
+        print(f"Dispatching {len(configs)} DP training runs...")
+        results = list(train_dp_model.starmap(configs))
 
         aggregated = _aggregate_dp_results(results)
         dp_path = artifacts / "dp_results.json"
