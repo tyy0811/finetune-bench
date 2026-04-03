@@ -237,13 +237,11 @@ Privacy infrastructure for the fine-tuning lifecycle: DP-SGD training with per-g
 
 | Config | Target ε | Actual ε | Macro-F1 |
 |--------|----------|----------|----------|
-| LoRA baseline (no DP) | ∞ | — | *pending GPU run* |
-| Loose DP | 50.0 | — | *pending GPU run* |
-| Moderate DP | 8.0 | — | *pending GPU run* |
-| Strict DP | 1.0 | — | *pending GPU run* |
-| Strict DP (tuned clip) | 1.0 | — | *pending GPU run* |
+| Loose DP | 50.0 | 50.00 | 0.2728 |
+| Moderate DP | 8.0 | 8.00 | 0.2454 |
+| Strict DP | 1.0 | 1.00 | 0.1879 |
 
-*Manual DP-SGD via `torch.func.vmap` with per-group gradient clipping. LoRA adapters (r=8) on DistilBERT attention + tabular MLP + fusion head trained from scratch under differential privacy. Per-group clipping (LoRA: C=0.1, head: C=1.0) solves gradient heterogeneity that causes Opacus's global clipping to fail. See [DECISIONS.md](DECISIONS.md).*
+*Manual DP-SGD via `torch.func.vmap` with per-group gradient clipping (LoRA: C=0.1, head: C=1.0) and Adam optimizer (lr=1e-3, 40 epochs). LoRA adapters (r=8) on DistilBERT attention + tabular MLP + fusion head trained under differential privacy. Seven approaches were tested before this solution — see [DECISIONS.md](DECISIONS.md) for the full diagnostic journey.*
 
 ### Membership Inference Attack
 
