@@ -131,6 +131,8 @@ def train_dp_vmap(
     class_weights: torch.Tensor | None = None,
     predict_fn: callable | None = None,
     optimizer_type: str = "sgd",
+    checkpoint_dir: str | None = None,
+    on_epoch_end: callable | None = None,
 ) -> dict:
     """Train with manual DP-SGD via vmap and per-group clipping.
 
@@ -139,6 +141,8 @@ def train_dp_vmap(
 
     predict_fn: optional (model, *batch_inputs) -> logits. Defaults to model(*inputs).
     optimizer_type: "sgd" (manual update) or "adam" (adaptive LR per parameter).
+    checkpoint_dir: if set, save model checkpoint after each epoch to this directory.
+    on_epoch_end: optional callback called after each epoch checkpoint (e.g. to commit a volume).
     """
     from opacus.accountants import RDPAccountant
 
@@ -242,6 +246,21 @@ def train_dp_vmap(
         epoch_losses.append(avg_loss)
         epoch_epsilons.append(eps_so_far)
         print(f"  epoch {_epoch+1}/{epochs}  loss={avg_loss:.4f}  eps={eps_so_far:.2f}", flush=True)
+
+        if checkpoint_dir is not None:
+            import os
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            ckpt = {
+                "epoch": _epoch + 1,
+                "model_state_dict": model.state_dict(),
+                "epoch_losses": epoch_losses,
+                "epoch_epsilons": epoch_epsilons,
+            }
+            if optimizer is not None:
+                ckpt["optimizer_state_dict"] = optimizer.state_dict()
+            torch.save(ckpt, os.path.join(checkpoint_dir, "latest.pt"))
+            if on_epoch_end is not None:
+                on_epoch_end()
 
     # Evaluate
     all_preds, all_labels = [], []

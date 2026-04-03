@@ -232,6 +232,8 @@ def train_dp_model(config: dict, seed: int) -> dict:
             tabular,
         )
 
+    ckpt_dir = f"/data/checkpoints/{config['name']}_seed{seed}"
+
     result = train_dp_vmap(
         model=model, loss_fn=loss_fn,
         train_dataset=flat_train, val_dataset=flat_val,
@@ -244,6 +246,8 @@ def train_dp_model(config: dict, seed: int) -> dict:
         seed=seed, class_weights=class_weights,
         predict_fn=predict_fn,
         optimizer_type=config.get("optimizer", "sgd"),
+        checkpoint_dir=ckpt_dir,
+        on_epoch_end=lambda: vol.commit(),
     )
 
     result["config_name"] = config["name"]
