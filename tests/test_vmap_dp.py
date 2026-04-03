@@ -127,6 +127,7 @@ class TestTrainDpVmap:
     """Integration test: vmap DP training on a simple model."""
 
     def test_train_dp_vmap_returns_metrics(self):
+        pytest.importorskip("opacus")
         from privacy.vmap_dp import train_dp_vmap
 
         model = nn.Sequential(nn.Linear(10, 5), nn.ReLU(), nn.Linear(5, 3))
@@ -169,6 +170,7 @@ class TestTrainDpVmap:
         assert len(result["epoch_losses"]) == 2
 
     def test_stricter_epsilon_changes_result(self):
+        pytest.importorskip("opacus")
         from privacy.vmap_dp import train_dp_vmap
 
         model = nn.Sequential(nn.Linear(10, 3))
