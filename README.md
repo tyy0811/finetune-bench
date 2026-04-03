@@ -255,7 +255,7 @@ Privacy infrastructure for the fine-tuning lifecycle: DP-SGD training with per-g
 | Moderate DP | 8.0 | 0.4890 | -0.06 | Random guess |
 | Strict DP | 1.0 | 0.4853 | -0.09 | Random guess |
 
-*Loss-threshold attack on 2000 balanced member/non-member samples.* The non-DP model shows minimal memorization (AUC 0.52), consistent with CFPB's source-level redaction and 20K dataset size limiting memorization risk. All DP models show AUC < 0.49, confirming DP-SGD eliminates the residual signal.
+*Loss-threshold attack on 2000 balanced member/non-member samples.* The non-DP model shows slight memorization (AUC 0.52); all DP models collapse to random-guess (~0.49) regardless of ε. This binary pattern — where any DP eliminates memorization rather than reducing it proportionally — is consistent with recent findings on DP fine-tuning, where gradient clipping is the primary mechanism disrupting memorization signals. Combined with the concave F1 tradeoff (the steepest drop is from non-DP to ε=50, not from ε=50 to ε=1), the practical implication is that the dominant deployment decision is *whether* to use DP at all — tightening from ε=50 to ε=1 costs relatively little additional utility while memorization protection is already complete. Note: this evaluation uses a loss-threshold attack; calibrated attacks (Carlini et al. 2022) may detect residual signal at high ε.
 
 ### Data Privacy Audit
 
