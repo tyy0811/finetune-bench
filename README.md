@@ -313,3 +313,17 @@ python scripts/generate_model_card.py
 - `company_complaint_volume` computed on training split only, log-transformed and standardized
 - `company` shortcut acknowledged; M1 provides shortcut-free baseline; M2b diagnostic confirms fusion gain depends on company identity
 - All encoding categories (top-50 companies, states, channels) derived from training data only
+
+### V1 → V2 Evolution
+
+| Feature | V1 | V2 |
+|---------|----|----|
+| Ablation | 5 variants, 3 seeds | Same |
+| Robustness | 8 corruption conditions | Same |
+| ONNX export | fp32 + fp16 latency | Same |
+| fp16 training | AMP comparison on A10G | Same |
+| **DP-SGD** | None | vmap + per-group clipping, 7 approaches tested |
+| **MIA** | None | Loss-threshold, balanced subsampling |
+| **Data audit** | None | Dual-scan (redaction markers + residual PII) |
+| **Model card** | None | Auto-generated, 8 Mitchell et al. sections |
+| Tests | 45 | 58 |
