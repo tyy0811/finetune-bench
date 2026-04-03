@@ -76,9 +76,11 @@ def plot_privacy_utility_tradeoff():
     ax.set_ylabel("Macro-F1", fontsize=12)
     ax.set_title("Privacy-Utility Tradeoff: DP-SGD via LoRA Adapters", fontsize=14)
     ax.legend(loc="center right", fontsize=10)
-    ax.set_xscale("log")
+    # Linear x-axis to show the full spread; log compresses ε=1→50 too much
     all_f1s = f1s + ([lora_f1] if lora_baseline else []) + ([baseline_f1] if baseline_f1 else [])
-    ax.set_ylim(0, max(0.75, max(all_f1s) + 0.1) if all_f1s else 0.75)
+    ymin = max(0, min(all_f1s) - 0.05) if all_f1s else 0
+    ymax = max(all_f1s) + 0.08 if all_f1s else 0.75
+    ax.set_ylim(ymin, ymax)
     ax.grid(True, alpha=0.3)
 
     fig.tight_layout()
